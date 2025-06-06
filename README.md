@@ -1,2 +1,27 @@
 # core-tools-delta-loader
 Thin wrapper for loading of Delta tables in Python
+
+
+## Usage
+
+### Examples
+
+```python
+import os
+
+import polars as pl
+
+from dtml.delta.loader import DeltaTable Loader
+
+loader = DeltaTableLoader(table_uri=os.environ["MY_TABLE_STORAGE_URI"])
+table_ldf: pl.LazyFrame = loader.load_as_polars()
+table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
+```
+
+### With Delta tables stored in Databricks Delta Lake
+To use this package to load tables stored in Databricks Delta Lake:
+* Specify the storage in location (in Azure Blob Storage) where the table
+is stored as the table URI
+    * This can be found for example in the Databricks Catalog Explorer UI under *Details* of a table
+* The reading identity has to have at least *Storage Blob Data Reader* permission
+on the storage location (storage account/container)
