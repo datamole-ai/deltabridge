@@ -7,6 +7,11 @@ on:
 
 jobs:
   publish_package:
+    env:
+      CHANGELOG_FILE: CHANGELOG.md
+      FULL_CHANGELOG_FILE: FULL_CHANGELOG.md
+      PACKAGE_NAME: dtml-delta-client
+      PACKAGE_PATH: dtml
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -33,8 +38,8 @@ jobs:
           base_version_command="
             convco
             version
-            --prefix=dtml-delta-loader
-            --paths=dtml/
+            --prefix=${{ env.PACKAGE_NAME }}
+            --paths=${{ env.PACKAGE_PATH }}/
           "
           old_version=$($base_version_command)
           if [ $old_version = "0.0.0" ]; then # i.e. there is no version yet
@@ -42,8 +47,8 @@ jobs:
           else
             new_version=$($base_version_command --bump)
           fi
-          new_tag="dtml-delta-loader/$new_version"
-          package_path=dtml
+          new_tag="${{ env.PACKAGE_NAME }}/$new_version"
+          package_path=${{ env.PACKAGE_PATH }}
           echo "OLD_VERSION=$old_version" >> $GITHUB_ENV
           echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
           echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
@@ -59,8 +64,6 @@ jobs:
         if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
         env:
           GH_TOKEN: ${{ github.token }}
-          CHANGELOG_FILE: CHANGELOG.md
-          FULL_CHANGELOG_FILE: FULL_CHANGELOG.md
         run: |
           ########################################
           # Generate changelogs
@@ -68,8 +71,8 @@ jobs:
           base_changelog_command="
             convco
             changelog
-            --prefix=dtml-delta-loader/
-            --paths=dtml/
+            --prefix=${{ env.PACKAGE_NAME }}/
+            --paths=${{ env.PACKAGE_PATH }}/
             --unreleased=${{ env.NEW_TAG }}
           "
           $base_changelog_command --max-versions=1 > ${{ env.CHANGELOG_FILE }}
