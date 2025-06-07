@@ -5,10 +5,10 @@ description = "Delta Table Loader"
 authors = [
     {name = "MLE", email = "mlengineering@datamole.ai"}
 ]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "azure-identity>=1.17.1",
-    "polars[deltalake,pyarrow]>=1.22.0",
+    "polars[deltalake,pyarrow]>=1.0.0,<=1.12.0",
 ]
 
 
