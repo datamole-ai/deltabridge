@@ -16,6 +16,7 @@ class TokenClient:
     ----------
     credential
         Azure credential which is used to fetch access tokens.
+        A DefaultAzureCredential is used if no credential is provided.
 
     Attributes
     ----------
@@ -48,6 +49,18 @@ class TokenClient:
 
 
 class DeltaTableClient:
+    """
+    Delta table client - used for accessing tables in Delta format
+    stored in Azure Blob Storage.
+
+    Parameters
+    ----------
+    table_uri: str
+        URI of the Delta table.
+    token_client: TokenClient
+        Token client used to refresh the storage access token.
+    """
+
     def __init__(self, table_uri: str, token_client: TokenClient):
         self._table_uri = table_uri
         self._token_client = token_client
