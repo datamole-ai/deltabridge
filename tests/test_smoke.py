@@ -1,2 +1,2 @@
 def test_smoke():
-    from dtml.delta.loader import DeltaTableLoader  # noqa: F401
+    from dtml.delta.client import DeltaTableClient, TokenClient  # noqa: F401
