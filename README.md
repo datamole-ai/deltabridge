@@ -1,4 +1,4 @@
-# core-tools-delta-loader
+# core-tools-delta-client
 Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
 
 
@@ -9,15 +9,19 @@ Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
 ```python
 import os
 
+import deltalake
 import polars as pl
 
-from dtml.delta.client import DeltaClient, DeltaTableClient
+from dtml.delta.client import DeltaClient
 
 table_client = DeltaTableClient(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 
-# Load some data
+# Get a DeltaTable instance
+delta_table: deltalake.DeltaTable = table_client.load_as_delta()
+
+# Load the data as a Polars DataFrame
 table_ldf: pl.LazyFrame = loader.load_as_polars()
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```
