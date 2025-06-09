@@ -1,14 +1,14 @@
 [project]
 name = "dtml-delta-client"
-version = "0"  # DO NOT CHANGE - managed by Git tags and CI
-description = "Delta Table Loader"
+dynamic = ["version"]
+description = "Delta Table Client"
 authors = [
     {name = "MLE", email = "mlengineering@datamole.ai"}
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "azure-identity>=1.17.1",
-    "polars[deltalake,pyarrow]~=1.12",  # There are issues with loading datetimes from Delta tables in polars >1.12, at least up to version 1.30
+    "polars[deltalake,pyarrow]~=1.12.0",  # There are issues with loading datetimes from Delta tables in polars >1.12, at least up to version 1.30
 ]
 
 
@@ -47,5 +47,10 @@ quote-style = "single"
 packages = ["dtml"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+version-scheme = "no-guess-dev"
+fallback-version = "0.0.0"
