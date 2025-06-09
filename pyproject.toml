@@ -1,6 +1,6 @@
 [project]
-name = "dtml-delta-loader"
-version = "0.1.0"  # DO NOT CHANGE - managed by Git tags and CI
+name = "dtml-delta-client"
+version = "0"  # DO NOT CHANGE - managed by Git tags and CI
 description = "Delta Table Loader"
 authors = [
     {name = "MLE", email = "mlengineering@datamole.ai"}
