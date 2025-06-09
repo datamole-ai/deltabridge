@@ -1,24 +1,40 @@
-from dtml.delta.azure.token import AzureTokenClient
-from dtml.delta.client import DeltaTableClient
-from dtml.delta.token import TokenClient
+from __future__ import annotations
+
+from datetime import datetime
+
+from azure.core.credentials import AccessToken, TokenCredential
+from azure.identity import ChainedTokenCredential, DefaultAzureCredential
+
+from dtml.delta.base_delta_client import BaseDeltaClient
 
 
-class AzureDeltaTableClient(DeltaTableClient):
-    """
-    Delta table client - used for accessing tables in Delta format
-    stored in Azure Blob Storage.
+class AzureDeltaClient(BaseDeltaClient):
+    """Token client manges the refreshing of Azure storage access tokens.
+
 
     Parameters
     ----------
-    table_uri: str
-        URI of the Delta table.
-    token_client: TokenClient
-        Token client used to refresh the storage access token.
+    credential
+        Azure credential which is used to fetch access tokens.
+        A DefaultAzureCredential is used if no credential is provided.
     """
 
     def __init__(
-        self, table_uri: str, token_client: TokenClient | None = None
+        self,
+        credential: TokenCredential | ChainedTokenCredential | None = None,
     ):
-        if token_client is None:
-            token_client = AzureTokenClient.default()
-        super().__init__(table_uri=table_uri, token_client=token_client)
+        self._credential = credential or DefaultAzureCredential()
+        self._token_obj = self._get_token()
+
+    def _get_token(self) -> AccessToken:
+        return self._credential.get_token('https://storage.azure.com/.default')
+
+    def _refresh_token(self) -> None:
+        """Refresh the token if it is expired or close to expiry."""
+        if self._token_obj.expires_on - 60 <= datetime.now().timestamp():
+            self._token_obj = self._get_token()
+
+    def _get_storage_options(self) -> dict[str, str]:
+        """Get the storage options for the Delta table."""
+        self._refresh_token()
+        return {'azure_storage_token': self._token_obj.token}

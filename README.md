@@ -7,9 +7,11 @@ using Python.
 A typical use case is exposing final products of a data pipeline (hosted
 on Azure Databricks) in a REST API.
 
-## Usage
+## 🚀 Usage
 
 ### Examples
+
+#### Azure
 
 ```python
 import os
@@ -17,17 +19,19 @@ import os
 import deltalake
 import polars as pl
 
-from dtml.delta.azure.client import AzureDeltaTableClient
+from dtml.delta.azure.client import AzureDeltaClient
 
-table_client = AzureDeltaTableClient(
+azure_delta_client = AzureDeltaClient()
+table_client = AzureDeltaClient.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 
 # Get a DeltaTable instance
 delta_table: deltalake.DeltaTable = table_client.load_as_delta()
 
-# Load the data as a Polars DataFrame
+# Load the data as a Polars LazyFrame
 table_ldf: pl.LazyFrame = loader.load_as_polars()
+# Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```
 
@@ -44,7 +48,7 @@ on the storage location (storage account/container).
  > This a limitation of the upstream `deltalake` library (a Python wrapper of `delta-rs`).
  > See https://github.com/delta-io/delta-rs/issues/1094
 
-## Writing to Delta tables
+## ✍️ Writing to Delta tables
 
 Writing to Delta tables is currently **not supported** by this package.
 The main reason are:
@@ -54,7 +58,13 @@ The main reason are:
 
 However, feel free to contact ML Engineering Team if you have a use case where write support would be beneficial.
 
-## Cloud provider support
+## ☁️ Cloud provider support
 The package is focused on Delta tables stored in Azure Blob Storage.
 However, it is designed to be easily extensible to support storage offerings
 from different cloud providers.
+
+
+## ✨ Delta to HTTP
+
+A ready-made general-purpose Docker image exposing Delta tables via a HTTP
+using this package is in progress. Stay tuned!

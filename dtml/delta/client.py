@@ -1,41 +1,57 @@
+from __future__ import annotations
+
+from typing import Callable
+
 import polars as pl
 from deltalake import DeltaTable
-
-from dtml.delta.token import TokenClient
 
 
 class DeltaTableClient:
     """
     Delta table client - used for accessing tables in Delta format
-    stored in Azure Blob Storage.
+    stored in a local or cloud storage.
+
+    The client is used to load the Delta table as a Polars LazyFrame
+    or as a DeltaTable object.
+
+    Notes
+    -----
+    The client should never be used directly. Instead, use the method
+    `get_table_client` of a class derived from `BaseDeltaClient` to
+    get a client for a specific storage provider.
 
     Parameters
     ----------
     table_uri: str
         URI of the Delta table.
-    token_client: TokenClient
-        Token client used to refresh the storage access token.
+    storage_options_fn: Callable[[], dict[str, str]]
+        Function which returns the storage options for the Delta table.
+        Storage options typically include an access token for the storage
+        in which the Delta table is stored.
     """
 
     def __init__(
         self,
         table_uri: str,
-        token_client: TokenClient,
+        storage_options_fn: Callable[[], dict[str, str]],
     ):
         self._table_uri = table_uri
-        self._token_client = token_client
+        self._storage_options_fn = storage_options_fn
+        self._storage_options = self._storage_options_fn()
         self._delta_table = self._create_delta_table()
 
     def _create_delta_table(self) -> DeltaTable:
         return DeltaTable(
             self._table_uri,
-            storage_options=self._token_client.storage_options,
+            storage_options=self._storage_options_fn(),
         )
 
     def _refresh_table(self) -> None:
-        if self._token_client.refresh_token():
-            # There is a new token -> recreate DeltaTable instance
+        refreshed_storage_options = self._storage_options_fn()
+        if self._storage_options != refreshed_storage_options:
+            # The storage options have changed -> recreate DeltaTable instance
             self._delta_table = self._create_delta_table()
+            self._storage_options = refreshed_storage_options
         else:
             # Update table metadata using existing token
             self._delta_table.update_incremental()

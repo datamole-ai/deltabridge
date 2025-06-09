@@ -3,24 +3,25 @@ from unittest.mock import Mock
 
 from azure.core.credentials import AccessToken, TokenCredential
 
-from dtml.delta.azure.token import AzureTokenClient
+from dtml.delta.azure.client import AzureDeltaClient
 
 
 def test_token_client_token_not_expired():
     # Create a mock credential
     mock_credential = Mock(spec=TokenCredential)
-    mock_credential.get_token.return_value = AccessToken(
-        token='test-token',
-        expires_on=int((datetime.now() + timedelta(hours=1)).timestamp()),
-    )
+    mock_credential.get_token.side_effect = [
+        AccessToken(
+            token='test-token',
+            expires_on=int((datetime.now() + timedelta(hours=1)).timestamp()),
+        ),
+        AssertionError('Token should not be refreshed'),
+    ]
 
-    token_client = AzureTokenClient(credential=mock_credential)
-    assert token_client.token_obj is not None
-    assert token_client.token_obj.token == 'test-token'
-    assert token_client.refresh_token() is False, (
-        'Token should not be refreshed'
-    )
-    assert token_client.token_obj.token == 'test-token'
+    delta_client = AzureDeltaClient(credential=mock_credential)
+    for _ in range(2):
+        assert delta_client._get_storage_options() == {
+            'azure_storage_token': 'test-token'
+        }, 'Token should not be refreshed'
 
 
 def test_token_client_token_expired():
@@ -29,21 +30,17 @@ def test_token_client_token_expired():
     mock_credential.get_token.side_effect = [
         AccessToken(
             token='old-token',
-            expires_on=int(
-                (datetime.now() + timedelta(seconds=10)).timestamp()
-            ),
+            expires_on=int(datetime.now().timestamp()),
         ),
         AccessToken(
             token='new-token',
             expires_on=int((datetime.now() + timedelta(hours=1)).timestamp()),
         ),
+        AssertionError('Token should not be refreshed'),
     ]
 
-    token_client = AzureTokenClient(credential=mock_credential)
-    assert token_client.token_obj.token == 'old-token'
-    assert token_client.refresh_token() is True, 'Token should be refreshed'
-    assert token_client.token_obj.token == 'new-token'
-    assert token_client.refresh_token() is False, (
-        'Token should not be refreshed'
-    )
-    assert token_client.token_obj.token == 'new-token'
+    delta_client = AzureDeltaClient(credential=mock_credential)
+    for _ in range(3):
+        assert delta_client._get_storage_options() == {
+            'azure_storage_token': 'new-token'
+        }, 'Token should be refreshed'
