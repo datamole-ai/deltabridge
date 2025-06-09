@@ -24,6 +24,8 @@ class TokenClient:
         An access token for Azure Blob Storage.
     """
 
+    __default: TokenClient | None = None
+
     def __init__(
         self,
         credential: TokenCredential | ChainedTokenCredential | None = None,
@@ -47,6 +49,13 @@ class TokenClient:
             return True
         return False
 
+    @staticmethod
+    def default() -> TokenClient:
+        """Default token client."""
+        if TokenClient.__default is None:
+            TokenClient.__default = TokenClient()
+        return TokenClient.__default
+
 
 class DeltaTableClient:
     """
@@ -59,11 +68,14 @@ class DeltaTableClient:
         URI of the Delta table.
     token_client: TokenClient
         Token client used to refresh the storage access token.
+        If not provided, the default token client is used.
     """
 
-    def __init__(self, table_uri: str, token_client: TokenClient):
+    def __init__(
+        self, table_uri: str, token_client: TokenClient | None = None
+    ):
         self._table_uri = table_uri
-        self._token_client = token_client
+        self._token_client = token_client or TokenClient.default()
         self._delta_table = DeltaTable(table_uri)
 
     def _refresh_table(self) -> None:
