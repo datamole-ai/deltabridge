@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from azure.core.credentials import AccessToken, TokenCredential
 
-from dtml.delta.client import TokenClient
+from dtml.delta.azure.token import AzureTokenClient
 
 
 def test_token_client_token_not_expired():
@@ -14,7 +14,7 @@ def test_token_client_token_not_expired():
         expires_on=int((datetime.now() + timedelta(hours=1)).timestamp()),
     )
 
-    token_client = TokenClient(credential=mock_credential)
+    token_client = AzureTokenClient(credential=mock_credential)
     assert token_client.token_obj is not None
     assert token_client.token_obj.token == 'test-token'
     assert token_client.refresh_token() is False, (
@@ -39,7 +39,7 @@ def test_token_client_token_expired():
         ),
     ]
 
-    token_client = TokenClient(credential=mock_credential)
+    token_client = AzureTokenClient(credential=mock_credential)
     assert token_client.token_obj.token == 'old-token'
     assert token_client.refresh_token() is True, 'Token should be refreshed'
     assert token_client.token_obj.token == 'new-token'

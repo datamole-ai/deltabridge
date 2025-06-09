@@ -12,9 +12,9 @@ import os
 import deltalake
 import polars as pl
 
-from dtml.delta.client import DeltaClient
+from dtml.delta.azure.client import AzureDeltaTableClient
 
-table_client = DeltaTableClient(
+table_client = AzureDeltaTableClient(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 

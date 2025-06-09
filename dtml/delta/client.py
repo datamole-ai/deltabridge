@@ -1,60 +1,7 @@
-from __future__ import annotations
-
-from datetime import datetime
-
 import polars as pl
-from azure.core.credentials import TokenCredential
-from azure.identity import ChainedTokenCredential, DefaultAzureCredential
 from deltalake import DeltaTable
 
-
-class TokenClient:
-    """Token client manges the refreshing of Azure storage access tokens.
-
-
-    Parameters
-    ----------
-    credential
-        Azure credential which is used to fetch access tokens.
-        A DefaultAzureCredential is used if no credential is provided.
-
-    Attributes
-    ----------
-    token_obj: AccessToken
-        An access token for Azure Blob Storage.
-    """
-
-    __default: TokenClient | None = None
-
-    def __init__(
-        self,
-        credential: TokenCredential | ChainedTokenCredential | None = None,
-    ):
-        self._credential = credential or DefaultAzureCredential()
-        self.token_obj = self._credential.get_token(
-            'https://storage.azure.com/.default'
-        )
-
-    def refresh_token(self) -> bool:
-        """Refresh the token if it is expired or close to expiry.
-        Returns
-        -------
-        bool
-            True if a new token was fetched, False otherwise.
-        """
-        if self.token_obj.expires_on - 60 <= datetime.now().timestamp():
-            self.token_obj = self._credential.get_token(
-                'https://storage.azure.com/.default'
-            )
-            return True
-        return False
-
-    @staticmethod
-    def default() -> TokenClient:
-        """Default token client."""
-        if TokenClient.__default is None:
-            TokenClient.__default = TokenClient()
-        return TokenClient.__default
+from dtml.delta.token import TokenClient
 
 
 class DeltaTableClient:
@@ -68,25 +15,27 @@ class DeltaTableClient:
         URI of the Delta table.
     token_client: TokenClient
         Token client used to refresh the storage access token.
-        If not provided, the default token client is used.
     """
 
     def __init__(
-        self, table_uri: str, token_client: TokenClient | None = None
+        self,
+        table_uri: str,
+        token_client: TokenClient,
     ):
         self._table_uri = table_uri
-        self._token_client = token_client or TokenClient.default()
-        self._delta_table = DeltaTable(table_uri)
+        self._token_client = token_client
+        self._delta_table = self._create_delta_table()
+
+    def _create_delta_table(self) -> DeltaTable:
+        return DeltaTable(
+            self._table_uri,
+            storage_options=self._token_client.storage_options,
+        )
 
     def _refresh_table(self) -> None:
         if self._token_client.refresh_token():
             # There is a new token -> recreate DeltaTable instance
-            self._delta_table = DeltaTable(
-                self._table_uri,
-                storage_options={
-                    'azure_storage_token': self._token_client.token_obj.token  # noqa: E501
-                },
-            )
+            self._delta_table = self._create_delta_table()
         else:
             # Update table metadata using existing token
             self._delta_table.update_incremental()
