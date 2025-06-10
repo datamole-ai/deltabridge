@@ -18,10 +18,9 @@ jobs:
           python-version: ${{ matrix.python_version }}
 
       - name: Install uv
-        env:
-          UV_VERSION: "0.7.11"
-        run: |
-          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.7.11
 
       - name: Set up cache
         uses: actions/cache@v4
