@@ -16,7 +16,7 @@ class DeltaTableClient:
 
     Notes
     -----
-    The client should never be used directly. Instead, use the method
+    The client should never be initialized directly. Instead, use the method
     `get_table_client` of a class derived from `BaseDeltaClient` to
     get a client for a specific storage provider.
 
@@ -43,15 +43,15 @@ class DeltaTableClient:
     def _create_delta_table(self) -> DeltaTable:
         return DeltaTable(
             self._table_uri,
-            storage_options=self._storage_options_fn(),
+            storage_options=self._storage_options,
         )
 
     def _refresh_table(self) -> None:
         refreshed_storage_options = self._storage_options_fn()
         if self._storage_options != refreshed_storage_options:
             # The storage options have changed -> recreate DeltaTable instance
-            self._delta_table = self._create_delta_table()
             self._storage_options = refreshed_storage_options
+            self._delta_table = self._create_delta_table()
         else:
             # Update table metadata using existing token
             self._delta_table.update_incremental()
