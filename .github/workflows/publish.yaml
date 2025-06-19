@@ -57,9 +57,6 @@ jobs:
           echo "new version: $new_version"
           echo "new tag: $new_tag"
           echo "packages path: $package_path"
-      - name: Get JFrog credentials
-        id: jfrog-credentials
-        uses: datamole-ai/core-tools-jfrog-oidc-exchange@v2.0
       - name: Release and publish
         if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
         env:
@@ -92,6 +89,6 @@ jobs:
           uv build
           uv publish \
             --index dtml \
-            --username ${{ steps.jfrog-credentials.outputs.username }} \
-            --password ${{ steps.jfrog-credentials.outputs.access-token }}
+            --username ${{ secrets.JFROG_PUBLISH_USERNAME }} \
+            --password ${{ secrets.JFROG_PUBLISH_PASSWORD }}
 
