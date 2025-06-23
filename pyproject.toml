@@ -1,6 +1,6 @@
 [project]
 name = "dtml-delta-client"
-dynamic = ["version"]
+version = "0"  # Do not change - managed by CI
 description = "Delta Table Client"
 authors = [
     {name = "MLE", email = "mlengineering@datamole.ai"}
@@ -48,10 +48,5 @@ quote-style = "single"
 packages = ["dtml"]
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "vcs"
-version-scheme = "no-guess-dev"
-fallback-version = "0.0.0"
