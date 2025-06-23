@@ -5,6 +5,7 @@ description = "Delta Table Client"
 authors = [
     {name = "MLE", email = "mlengineering@datamole.ai"}
 ]
+classifiers = ["Private :: Do Not Upload"] # Prevents accidental uploads to PyPI.
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "azure-identity>=1.17.1",
