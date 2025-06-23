@@ -14,7 +14,7 @@ jobs:
       PACKAGE_PATH: dtml
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
       id-token: write
     concurrency:
       group: publish-package
@@ -91,4 +91,3 @@ jobs:
             --index dtml \
             --username ${{ secrets.JFROG_PUBLISH_USERNAME }} \
             --password ${{ secrets.JFROG_PUBLISH_PASSWORD }}
-
