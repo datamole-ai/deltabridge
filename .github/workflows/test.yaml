@@ -1,0 +1,41 @@
+name: Test, Lint, Format
+
+on: [push]
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python_version: [3.11, 3.12, 3.13]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.7.11
+
+      - name: Set up cache
+        uses: actions/cache@v4
+        id: venv-cache
+        with:
+          path: ./.venv/
+          key: py-${{ matrix.python_version }}-uv-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install dependencies
+        if: steps.venv-cache.outputs.cache-hit != 'true'
+        run: |
+            uv sync
+
+      - name: Run checks
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest .

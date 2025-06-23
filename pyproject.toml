@@ -1,0 +1,56 @@
+[project]
+name = "dtml-delta-client"
+dynamic = ["version"]
+description = "Delta Table Client"
+authors = [
+    {name = "MLE", email = "mlengineering@datamole.ai"}
+]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "azure-identity>=1.17.1",
+    "polars[deltalake,pyarrow]~=1.12.0",  # There are issues with loading datetimes from Delta tables in polars >1.12, at least up to version 1.30
+]
+
+
+[dependency-groups]
+dev = [
+    "pytest~=8.4",
+    "pytest-mock~=3.8",
+    "ruff~=0.11",
+]
+
+[[tool.uv.index]]
+name = "dtml"
+url = "https://datamole.jfrog.io/artifactory/api/pypi/pypi-general/simple"
+publish-url = "https://datamole.jfrog.io/artifactory/api/pypi/pypi-general-local"
+explicit = true
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+lint.select = [
+    "E",
+    "F",
+    "N",
+    "W",
+    "I001",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+"*/**" = ["E402"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["dtml"]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+version-scheme = "no-guess-dev"
+fallback-version = "0.0.0"
