@@ -86,6 +86,7 @@ jobs:
           # Publish to JFrog
           ########################################
           # Version set based on tag using hatch-vcs
+          uv version ${{ env.NEW_VERSION }}
           uv build
           uv publish \
             --index dtml \
