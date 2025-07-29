@@ -36,6 +36,26 @@ table_ldf: pl.LazyFrame = table_client.load_as_polars()
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```
 
+#### Local filesystem
+
+```python
+import polars as pl
+
+from dtml.delta.local.client import LocalDeltaClient
+
+MY_TABLE_PATH = '/tmp/my_table'
+
+# Write a table to a local filesystem
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(
+    target=MY_TABLE_PATH
+)
+
+local_delta_client = LocalDeltaClient()
+table_client = local_delta_client.get_table_client(
+    table_uri=MY_TABLE_PATH  # File path can be used as table URI
+)
+```
+
 ### With Delta tables stored in Azure Databricks Delta Lake
 To use this package to load tables stored in Azure Databricks Delta Lake:
 * Specify the storage in location (in Azure Blob Storage) where the table
