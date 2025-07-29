@@ -2,11 +2,13 @@
 Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
 
 Use this package if you need to read Delta tables stored in Azure Blob Storage
-using Python without dependending on services provided by Databricks
+using Python without depending on services provided by Databricks
 (SQL endpoints, general-purpose compute).
 
 A typical use case is exposing final products of a data pipeline (hosted
 on Azure Databricks) in a REST API.
+
+Access to Delta tables stored on local filesystem is also supported.
 
 ## 🚀 Usage
 
@@ -89,3 +91,4 @@ from different cloud providers.
 
 A ready-made general-purpose Docker image exposing Delta tables via a HTTP
 using this package is in progress. Stay tuned!
+
