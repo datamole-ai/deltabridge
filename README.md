@@ -31,7 +31,7 @@ table_client = AzureDeltaClient.get_table_client(
 delta_table: deltalake.DeltaTable = table_client.load_as_delta()
 
 # Load the data as a Polars LazyFrame
-table_ldf: pl.LazyFrame = loader.load_as_polars()
+table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```
