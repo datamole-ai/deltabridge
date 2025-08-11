@@ -2,11 +2,13 @@
 Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
 
 Use this package if you need to read Delta tables stored in Azure Blob Storage
-using Python without dependending on services provided by Databricks
+using Python without depending on services provided by Databricks
 (SQL endpoints, general-purpose compute).
 
 A typical use case is exposing final products of a data pipeline (hosted
 on Azure Databricks) in a REST API.
+
+Access to Delta tables stored on local filesystem is also supported.
 
 ## 🚀 Usage
 
@@ -34,6 +36,26 @@ delta_table: deltalake.DeltaTable = table_client.load_as_delta()
 table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
+```
+
+#### Local filesystem
+
+```python
+import polars as pl
+
+from dtml.delta.local.client import LocalDeltaClient
+
+MY_TABLE_PATH = '/tmp/my_table'
+
+# Write a table to a local filesystem
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(
+    target=MY_TABLE_PATH
+)
+
+local_delta_client = LocalDeltaClient()
+table_client = local_delta_client.get_table_client(
+    table_uri=MY_TABLE_PATH  # File path can be used as table URI
+)
 ```
 
 ### With Delta tables stored in Azure Databricks Delta Lake
@@ -69,3 +91,4 @@ from different cloud providers.
 
 A ready-made general-purpose Docker image exposing Delta tables via a HTTP
 using this package is in progress. Stay tuned!
+
