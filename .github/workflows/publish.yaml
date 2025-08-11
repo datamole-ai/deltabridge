@@ -38,7 +38,7 @@ jobs:
           base_version_command="
             convco
             version
-            --prefix=${{ env.PACKAGE_NAME }}
+            --prefix="v"
             --paths=${{ env.PACKAGE_PATH }}/
           "
           old_version=$($base_version_command)
