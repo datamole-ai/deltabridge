@@ -3,6 +3,7 @@ name: Publish
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 
 jobs:
@@ -47,6 +48,10 @@ jobs:
           else
             new_version=$($base_version_command --bump)
           fi
+          if [ ${{ github.event_name }} = "workflow_dispatch" ]; then
+            commit_sha=${{ github.sha }}
+            new_version=${new_version}+dev.${commit_sha::8}
+          fi
           new_tag="v$new_version"
           package_path=${{ env.PACKAGE_PATH }}
           echo "OLD_VERSION=$old_version" >> $GITHUB_ENV
@@ -57,8 +62,8 @@ jobs:
           echo "new version: $new_version"
           echo "new tag: $new_tag"
           echo "packages path: $package_path"
-      - name: Release and publish
-        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
+      - name: Create GitHub Release and changelogs
+        if: ${{ env.OLD_VERSION != env.NEW_VERSION && github.event_name != 'workflow_dispatch' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -82,6 +87,9 @@ jobs:
             --title ${{ env.NEW_TAG }} \
             --notes-file ${{ env.CHANGELOG_FILE }} \
             ${{ env.FULL_CHANGELOG_FILE }}
+      - name: Publish to JFrog
+        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
+        run: |
           ########################################
           # Publish to JFrog
           ########################################
