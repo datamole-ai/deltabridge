@@ -114,4 +114,6 @@ class DeltaTableClient:
             # No partition filter for non-partitioned tables
             pyarrow_options = {}
 
-        return pl.scan_delta(source=table, pyarrow_options=pyarrow_options)
+        return pl.scan_delta(
+            source=table, use_pyarrow=True, pyarrow_options=pyarrow_options
+        )

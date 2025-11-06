@@ -1,4 +1,5 @@
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
@@ -12,7 +13,14 @@ from dtml.delta.client import DeltaTableClient
 
 @pytest.fixture
 def sample_df():
-    return pl.DataFrame({'id': [1, 2, 3], 'value': ['a', 'b', 'c']})
+    return pl.DataFrame(
+        {
+            'id': [1, 2, 3],
+            'value': ['a', 'b', 'c'],
+            'datetime': [datetime.now(), datetime.now(), datetime.now()],
+        },
+        schema={'id': pl.Int64, 'value': pl.Utf8, 'datetime': pl.Datetime},
+    )
 
 
 @pytest.fixture
