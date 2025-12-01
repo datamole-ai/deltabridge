@@ -50,7 +50,7 @@ jobs:
           fi
           if [ ${{ github.event_name }} = "workflow_dispatch" ]; then
             commit_sha=${{ github.sha }}
-            new_version=${new_version}+dev.${commit_sha::8}
+            new_version=${new_version}rc${{ github.run_id }}+git.${commit_sha::8}
           fi
           new_tag="v$new_version"
           package_path=${{ env.PACKAGE_PATH }}
