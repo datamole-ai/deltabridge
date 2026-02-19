@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Iterable
 
 import polars as pl
 from deltalake import DeltaTable
@@ -69,20 +69,16 @@ class DeltaTableClient:
 
     def load_as_polars(
         self,
-        partitioned_column_name: str | None = None,
-        partitioned_column_value: str | None = None,
+        partition_filter: Iterable[tuple[str, str]] | None = None,
     ) -> pl.LazyFrame:
         """Load a Delta table, with optional partition filtering.
 
         Parameters
         ----------
-        partitioned_column_name
-            Name of the column used for partitioning. If not provided,
-            no partition filtering will be applied.
-        partitioned_column_value
-            Value of the partition column to filter. Must be provided
-            alongside `partitioned_column_name` for filtering
-            to take effect.
+        partition_filter: Iterable[tuple[str, str]] | None
+            Iterable of tuples containing the column name and value
+            to filter the table by. If not provided, no partition filtering
+            will be applied.
 
         Returns
         -------
@@ -100,14 +96,10 @@ class DeltaTableClient:
         table = self.load_as_delta()
 
         # Check if the table is partitioned
-        if partitioned_column_name and partitioned_column_value:
+        if partition_filter is not None:
             pyarrow_options = {
                 'partitions': [
-                    (
-                        partitioned_column_name,
-                        '=',
-                        partitioned_column_value,
-                    )
+                    (column, '=', value) for column, value in partition_filter
                 ]
             }
         else:
