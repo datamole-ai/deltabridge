@@ -42,7 +42,11 @@ def test_load_as_delta(temp_delta_table_uri):
     )
     loaded_delta_table = delta_table_client.load_as_delta()
     assert isinstance(loaded_delta_table, DeltaTable)
-    assert Path(loaded_delta_table.table_uri) == Path(temp_delta_table_uri)
+    # delta-rs started prefixing file:// to the table URI in an unknwon version
+    # removing the prefix ensures compatibility with both old and new versions
+    assert Path(loaded_delta_table.table_uri.replace('file:', '')) == Path(
+        temp_delta_table_uri
+    )
 
 
 def test_load_as_polars(temp_delta_table_uri, sample_df):
