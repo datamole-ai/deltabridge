@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable
+from typing import Any, Callable, Literal
 
 import polars as pl
 from deltalake import DeltaTable
+
+_PartitionFilterOperator = Literal['=', '!=', 'in', 'not in']
 
 
 class DeltaTableClient:
@@ -69,16 +71,19 @@ class DeltaTableClient:
 
     def load_as_polars(
         self,
-        partition_filter: Iterable[tuple[str, str]] | None = None,
+        partition_filter: list[tuple[str, _PartitionFilterOperator, Any]]
+        | None = None,
     ) -> pl.LazyFrame:
         """Load a Delta table, with optional partition filtering.
 
         Parameters
         ----------
-        partition_filter: Iterable[tuple[str, str]] | None
-            Iterable of tuples containing the column name and value
-            to filter the table by. If not provided, no partition filtering
-            will be applied.
+        partition_filter
+            Iterable of tuples containing the column name, operator and value
+            to filter the table by partition columns.
+            If multiple partition filters are provided, they are combined using
+            the logical AND operator.
+            If not provided, no partition filtering will be applied.
 
         Returns
         -------
@@ -86,22 +91,12 @@ class DeltaTableClient:
             A Polars LazyFrame representing the scanned Delta table.
             If partition filtering is applied, only matching rows
             are included.
-
-        Notes
-        -----
-        - If both `partitioned_column_name` and `partitioned_column_value`
-        are not provided, the entire table is loaded
-        without partition filtering.
         """
         table = self.load_as_delta()
 
         # Check if the table is partitioned
-        if partition_filter is not None:
-            pyarrow_options = {
-                'partitions': [
-                    (column, '=', value) for column, value in partition_filter
-                ]
-            }
+        if partition_filter:
+            pyarrow_options = {'partitions': partition_filter}
         else:
             # No partition filter for non-partitioned tables
             pyarrow_options = {}
