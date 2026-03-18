@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from enum import StrEnum
+from typing import Any, Callable
 
 import polars as pl
 from deltalake import DeltaTable
 
-_PartitionFilterOperator = Literal['=', '!=', 'in', 'not in']
+
+class PartitionFilterOperator(StrEnum):
+    EQUAL = '='
+    NOT_EQUAL = '!='
+    IN = 'in'
+    NOT_IN = 'not in'
 
 
 class DeltaTableClient:
@@ -71,7 +77,7 @@ class DeltaTableClient:
 
     def load_as_polars(
         self,
-        partition_filter: list[tuple[str, _PartitionFilterOperator, Any]]
+        partition_filter: list[tuple[str, PartitionFilterOperator, Any]]
         | None = None,
     ) -> pl.LazyFrame:
         """Load a Delta table, with optional partition filtering.
@@ -91,11 +97,19 @@ class DeltaTableClient:
             A Polars LazyFrame representing the scanned Delta table.
             If partition filtering is applied, only matching rows
             are included.
+
+        Raises
+        ------
+        ValueError
+            If an invalid partition filter operator is provided.
         """
         table = self.load_as_delta()
 
         # Check if the table is partitioned
         if partition_filter:
+            for _, operator, _ in partition_filter:
+                # Raises ValueError if invalid
+                PartitionFilterOperator(operator)
             pyarrow_options = {'partitions': partition_filter}
         else:
             # No partition filter for non-partitioned tables

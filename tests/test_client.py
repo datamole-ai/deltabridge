@@ -8,7 +8,7 @@ from deltalake import DeltaTable
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
-from dtml.delta.client import DeltaTableClient
+from dtml.delta.client import DeltaTableClient, PartitionFilterOperator
 
 
 @pytest.fixture
@@ -69,21 +69,24 @@ def test_load_as_polars(temp_delta_table_uri, sample_df):
             lambda df: df,
         ),
         (
-            [('id', '=', '2'), ('value', '=', 'c')],
+            [
+                ('id', PartitionFilterOperator.EQUAL, '2'),
+                ('value', '=', 'c'),  # Test with string literal
+            ],
             lambda df: df.filter(
                 (pl.col('id') == 2) & (pl.col('value') == 'c')
             ),
         ),
         (
-            [('id', 'in', ['2', '3'])],
+            [('id', PartitionFilterOperator.IN, ['2', '3'])],
             lambda df: df.filter(pl.col('id').is_in([2, 3])),
         ),
         (
-            [('value', 'not in', ['b', 'c'])],
+            [('value', PartitionFilterOperator.NOT_IN, ['b', 'c'])],
             lambda df: df.filter(~pl.col('value').is_in(['b', 'c'])),
         ),
         (
-            [('id', '!=', '2')],
+            [('id', PartitionFilterOperator.NOT_EQUAL, '2')],
             lambda df: df.filter(pl.col('id') != 2),
         ),
     ],
@@ -108,3 +111,14 @@ def test_load_as_polars_with_partition_operators(
         loaded_df,
         correct_partition_df,
     )
+
+
+def test_load_invalid_partition_filter(temp_delta_table_uri):
+    delta_table_client = DeltaTableClient(
+        table_uri=temp_delta_table_uri,
+        storage_options_fn=lambda: {},
+    )
+    with pytest.raises(ValueError):
+        delta_table_client.load_as_polars(
+            partition_filter=[('id', 'invalid', '2')],
+        )
