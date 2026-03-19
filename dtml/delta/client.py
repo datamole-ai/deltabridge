@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from typing import Callable
+from enum import StrEnum
+from typing import Any, Callable
 
 import polars as pl
 from deltalake import DeltaTable
+
+
+class PartitionFilterOperator(StrEnum):
+    EQUAL = '='
+    NOT_EQUAL = '!='
+    IN = 'in'
+    NOT_IN = 'not in'
 
 
 class DeltaTableClient:
@@ -69,20 +77,19 @@ class DeltaTableClient:
 
     def load_as_polars(
         self,
-        partitioned_column_name: str | None = None,
-        partitioned_column_value: str | None = None,
+        partition_filter: list[tuple[str, PartitionFilterOperator, Any]]
+        | None = None,
     ) -> pl.LazyFrame:
         """Load a Delta table, with optional partition filtering.
 
         Parameters
         ----------
-        partitioned_column_name
-            Name of the column used for partitioning. If not provided,
-            no partition filtering will be applied.
-        partitioned_column_value
-            Value of the partition column to filter. Must be provided
-            alongside `partitioned_column_name` for filtering
-            to take effect.
+        partition_filter
+            Iterable of tuples containing the column name, operator and value
+            to filter the table by partition columns.
+            If multiple partition filters are provided, they are combined using
+            the logical AND operator.
+            If not provided, no partition filtering will be applied.
 
         Returns
         -------
@@ -91,25 +98,19 @@ class DeltaTableClient:
             If partition filtering is applied, only matching rows
             are included.
 
-        Notes
-        -----
-        - If both `partitioned_column_name` and `partitioned_column_value`
-        are not provided, the entire table is loaded
-        without partition filtering.
+        Raises
+        ------
+        ValueError
+            If an invalid partition filter operator is provided.
         """
         table = self.load_as_delta()
 
         # Check if the table is partitioned
-        if partitioned_column_name and partitioned_column_value:
-            pyarrow_options = {
-                'partitions': [
-                    (
-                        partitioned_column_name,
-                        '=',
-                        partitioned_column_value,
-                    )
-                ]
-            }
+        if partition_filter:
+            for _, operator, _ in partition_filter:
+                # Raises ValueError if invalid
+                PartitionFilterOperator(operator)
+            pyarrow_options = {'partitions': partition_filter}
         else:
             # No partition filter for non-partitioned tables
             pyarrow_options = {}
