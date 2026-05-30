@@ -1,16 +1,17 @@
-# core-tools-delta-client
-Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
+# deltabridge
+Thin Python wrapper for reading Delta tables from Azure Blob Storage with low
+and stable latency. Optimized for repeated reads from long-running Python
+services. No Databricks SQL endpoint or Databricks cluster required.
 
-Use this package if you need to read Delta tables stored in Azure Blob Storage
-using Python without depending on services provided by Databricks
-(SQL endpoints, general-purpose compute).
+A typical use case is exposing final products of a data pipeline hosted on
+Azure Databricks via a REST API, where request latency should stay predictable.
 
-A typical use case is exposing final products of a data pipeline (hosted
-on Azure Databricks) in a REST API.
+Access to Delta tables stored on a local filesystem is also supported.
 
-Access to Delta tables stored on local filesystem is also supported.
+ > **Note**: The efficiency is achieved by using Rust-based loading of Delta tables through [delta-rs](https://github.com/delta-io/delta-rs)
+ > and automatic incremental caching of Delta transaction logs.
 
-## 🚀 Usage
+## Usage
 
 ### Examples
 
@@ -66,12 +67,7 @@ is stored as the table URI.
 * The reading identity has to have at least *Storage Blob Data Reader* permission
 on the storage location (storage account/container).
 
- > **Note**: Delta tables with deletion vectors enabled cannot be accessed using this package.
- > We recommend disabling the feature on tables which are to be read using this package.
- > This a limitation of the upstream `deltalake` library (a Python wrapper of `delta-rs`).
- > See https://github.com/delta-io/delta-rs/issues/1094
-
-## ✍️ Writing to Delta tables
+## Writing to Delta tables
 
 Writing to Delta tables is currently **not supported** by this package.
 The main reason are:
@@ -79,16 +75,13 @@ The main reason are:
 * most current write use cases run in pipelines hosted on Databricks,
   with spark/pyspark being used for writes
 
-However, feel free to contact ML Engineering Team if you have a use case where write support would be beneficial.
-
-## ☁️ Cloud provider support
+## Cloud provider support
 The package is focused on Delta tables stored in Azure Blob Storage.
 However, it is designed to be easily extensible to support storage offerings
 from different cloud providers.
 
 
-## ✨ Delta to HTTP
+## Delta to HTTP
 
-A ready-made general-purpose Docker image exposing Delta tables via a HTTP
+A ready-made general-purpose Docker image exposing Delta tables via an HTTP
 using this package is in progress. Stay tuned!
-
