@@ -79,9 +79,3 @@ The main reason are:
 The package is focused on Delta tables stored in Azure Blob Storage.
 However, it is designed to be easily extensible to support storage offerings
 from different cloud providers.
-
-
-## Delta to HTTP
-
-A ready-made general-purpose Docker image exposing Delta tables via an HTTP
-using this package is in progress. Stay tuned!
