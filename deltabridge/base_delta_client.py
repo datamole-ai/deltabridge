@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from dtml.delta.client import DeltaTableClient
+from deltabridge.client import DeltaTableClient
 
 
 class BaseDeltaClient(ABC):

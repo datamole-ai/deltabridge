@@ -1,16 +1,20 @@
 [project]
-name = "dtml-delta-client"
+name = "deltabridge"
 version = "0"  # Do not change - managed by CI
-description = "Delta Table Client"
+license = "MIT"
+description = "Thin Python wrapper for reading Delta tables from Azure Blob Storage with low and stable latency."
 authors = [
-    {name = "MLE", email = "mlengineering@datamole.ai"}
+    {name = "Datamole (Hellen Team)", email = "hellen@datamole.ai"}
 ]
-classifiers = ["Private :: Do Not Upload"] # Prevents accidental uploads to PyPI.
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "azure-identity>=1.17.1",
     "polars[deltalake,pyarrow]>=1.14.0,<2.0.0"
 ]
+readme = "README.md"
+
+[project.urls]
+Repository = "https://github.com/datamole-ai/deltabridge"
 
 
 [dependency-groups]
@@ -19,12 +23,6 @@ dev = [
     "pytest-mock~=3.8",
     "ruff~=0.11",
 ]
-
-[[tool.uv.index]]
-name = "dtml"
-url = "https://datamole.jfrog.io/artifactory/api/pypi/pypi-general/simple"
-publish-url = "https://datamole.jfrog.io/artifactory/api/pypi/pypi-general-local"
-explicit = true
 
 [tool.ruff]
 line-length = 79
@@ -45,7 +43,7 @@ quote-style = "single"
 "*/**" = ["E402"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["dtml"]
+packages = ["deltabridge"]
 
 [build-system]
 requires = ["hatchling"]

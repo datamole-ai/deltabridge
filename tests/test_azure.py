@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from azure.core.credentials import AccessToken, TokenCredential
 
-from dtml.delta.azure.client import AzureDeltaClient
+from deltabridge.azure.client import AzureDeltaClient
 
 
 def test_token_client_token_not_expired():

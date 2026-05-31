@@ -1,19 +1,18 @@
-name: Publish
+name: Release
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+on: workflow_dispatch
 
+env:
+  CHANGELOG_FILE: CHANGELOG.md
+  FULL_CHANGELOG_FILE: FULL_CHANGELOG.md
+  README_FILE: README.md
+  PACKAGE_NAME: deltabridge
+  PACKAGE_PATH: deltabridge
 
 jobs:
-  publish_package:
-    env:
-      CHANGELOG_FILE: CHANGELOG.md
-      FULL_CHANGELOG_FILE: FULL_CHANGELOG.md
-      PACKAGE_NAME: dtml-delta-client
-      PACKAGE_PATH: dtml
+  release:
     runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
       id-token: write
@@ -39,8 +38,11 @@ jobs:
           base_version_command="
             convco
             version
-            --prefix="v"
+            --prefix=v
             --paths=${{ env.PACKAGE_PATH }}/
+            --paths=pyproject.toml
+            --paths=uv.lock
+            --paths=${{ env.README_FILE }}
           "
           old_version=$($base_version_command)
           if [ $old_version = "0.0.0" ]; then # i.e. there is no version yet
@@ -48,22 +50,20 @@ jobs:
           else
             new_version=$($base_version_command --bump)
           fi
-          if [ ${{ github.event_name }} = "workflow_dispatch" ]; then
-            commit_sha=${{ github.sha }}
-            new_version=${new_version}rc${{ github.run_id }}+git.${commit_sha::8}
-          fi
           new_tag="v$new_version"
+          release_name=${{ env.PACKAGE_NAME }}/"$new_version"
           package_path=${{ env.PACKAGE_PATH }}
           echo "OLD_VERSION=$old_version" >> $GITHUB_ENV
           echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
           echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
+          echo "RELEASE_NAME=$release_name" >> $GITHUB_ENV
           echo "PACKAGE_PATH=$package_path" >> $GITHUB_ENV
           echo "old version: $old_version"
           echo "new version: $new_version"
           echo "new tag: $new_tag"
           echo "packages path: $package_path"
-      - name: Create GitHub Release and changelogs
-        if: ${{ env.OLD_VERSION != env.NEW_VERSION && github.event_name != 'workflow_dispatch' }}
+      - name: Create changelogs and build
+        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -73,30 +73,29 @@ jobs:
           base_changelog_command="
             convco
             changelog
-            --prefix=${{ env.PACKAGE_NAME }}/
+            --prefix=v
             --paths=${{ env.PACKAGE_PATH }}/
+            --paths=pyproject.toml
+            --paths=${{ env.README_FILE }}
             --unreleased=${{ env.NEW_TAG }}
           "
           $base_changelog_command --max-versions=1 > ${{ env.CHANGELOG_FILE }}
           $base_changelog_command > ${{ env.FULL_CHANGELOG_FILE }}
           ########################################
-          # Create GitHub Release
+          # Build Package
           ########################################
-          gh release create \
-            ${{ env.NEW_TAG }} \
-            --title ${{ env.NEW_TAG }} \
-            --notes-file ${{ env.CHANGELOG_FILE }} \
-            ${{ env.FULL_CHANGELOG_FILE }}
-      - name: Publish to JFrog
-        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
-        run: |
-          ########################################
-          # Publish to JFrog
-          ########################################
-          # Version set based on tag using hatch-vcs
           uv version ${{ env.NEW_VERSION }}
           uv build
-          uv publish \
-            --index dtml \
-            --username ${{ secrets.JFROG_PUBLISH_USERNAME }} \
-            --password ${{ secrets.JFROG_PUBLISH_PASSWORD }}
+      - name: Publish to Pypi
+        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create GitHub Release
+        if: ${{ env.OLD_VERSION != env.NEW_VERSION }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create \
+            ${{ env.NEW_TAG }} \
+            --title ${{ env.RELEASE_NAME }} \
+            --notes-file ${{ env.CHANGELOG_FILE }} \
+            ${{ env.FULL_CHANGELOG_FILE }}

@@ -23,7 +23,7 @@ import os
 import deltalake
 import polars as pl
 
-from dtml.delta.azure.client import AzureDeltaClient
+from deltabridge.azure.client import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
 table_client = AzureDeltaClient.get_table_client(
@@ -44,7 +44,7 @@ table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```python
 import polars as pl
 
-from dtml.delta.local.client import LocalDeltaClient
+from deltabridge.local.client import LocalDeltaClient
 
 MY_TABLE_PATH = '/tmp/my_table'
 
