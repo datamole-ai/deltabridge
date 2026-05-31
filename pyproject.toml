@@ -2,16 +2,40 @@
 name = "deltabridge"
 version = "0"  # Do not change - managed by CI
 license = "MIT"
+license-files = ["LICENSE"]
 description = "Thin Python wrapper for reading Delta tables from Azure Blob Storage with low and stable latency."
 authors = [
     {name = "Datamole (Hellen Team)", email = "hellen@datamole.ai"}
 ]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "azure-identity>=1.17.1",
     "polars[deltalake,pyarrow]>=1.14.0,<2.0.0"
 ]
 readme = "README.md"
+keywords = [
+    "delta",
+    "delta-lake",
+    "deltalake",
+    "delta-rs",
+    "polars",
+    "azure",
+    "blob-storage",
+    "data-engineering",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 
 [project.urls]
 Repository = "https://github.com/datamole-ai/deltabridge"

@@ -11,6 +11,18 @@ Access to Delta tables stored on a local filesystem is also supported.
  > **Note**: The efficiency is achieved by using Rust-based loading of Delta tables through [delta-rs](https://github.com/delta-io/delta-rs)
  > and automatic incremental caching of Delta transaction logs.
 
+## Installation
+
+```bash
+pip install deltabridge
+```
+
+Or, with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv add deltabridge
+```
+
 ## Usage
 
 ### Examples
@@ -23,10 +35,11 @@ import os
 import deltalake
 import polars as pl
 
-from deltabridge.azure.client import AzureDeltaClient
+from deltabridge import PartitionFilterOperator
+from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
-table_client = AzureDeltaClient.get_table_client(
+table_client = azure_delta_client.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 
@@ -37,6 +50,16 @@ delta_table: deltalake.DeltaTable = table_client.load_as_delta()
 table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
+
+# For partitioned tables, push filters down to the partition columns so that
+# only matching partitions are read from storage (avoiding a full scan).
+# Multiple partition filters are combined using the logical AND operator.
+table_df = table_client.load_as_polars(
+    partition_filter=[
+        ('country', PartitionFilterOperator.IN, ['CZ', 'SK']),
+        ('year', PartitionFilterOperator.EQUAL, '2024'),
+    ],
+).collect()
 ```
 
 #### Local filesystem
@@ -44,7 +67,7 @@ table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```python
 import polars as pl
 
-from deltabridge.local.client import LocalDeltaClient
+from deltabridge.local import LocalDeltaClient
 
 MY_TABLE_PATH = '/tmp/my_table'
 
@@ -57,6 +80,10 @@ local_delta_client = LocalDeltaClient()
 table_client = local_delta_client.get_table_client(
     table_uri=MY_TABLE_PATH  # File path can be used as table URI
 )
+
+# Load the data as a Polars LazyFrame and collect it into a DataFrame
+table_df = table_client.load_as_polars().collect()
+print(table_df)
 ```
 
 ### With Delta tables stored in Azure Databricks Delta Lake
