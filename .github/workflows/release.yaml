@@ -1,6 +1,14 @@
 name: Release
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Explicit version to release, e.g. 1.0.0. Leave empty to derive the
+          version automatically from conventional commits since the last tag.
+        required: false
+        type: string
 
 env:
   CHANGELOG_FILE: CHANGELOG.md
@@ -34,6 +42,8 @@ jobs:
           curl -sSfL "https://github.com/convco/convco/releases/download/${{ env.CONVCO_VERSION }}/convco-ubuntu.zip" | zcat > /usr/local/bin/convco
           chmod +x /usr/local/bin/convco
       - name: Set variables
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           base_version_command="
             convco
@@ -41,11 +51,12 @@ jobs:
             --prefix=v
             --paths=${{ env.PACKAGE_PATH }}/
             --paths=pyproject.toml
-            --paths=uv.lock
             --paths=${{ env.README_FILE }}
           "
           old_version=$($base_version_command)
-          if [ $old_version = "0.0.0" ]; then # i.e. there is no version yet
+          if [ -n "$INPUT_VERSION" ]; then # explicit version requested
+            new_version="$INPUT_VERSION"
+          elif [ $old_version = "0.0.0" ]; then # i.e. there is no version yet
             new_version="0.1.0"
           else
             new_version=$($base_version_command --bump)
