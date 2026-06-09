@@ -5,9 +5,6 @@ Optimized for repeated reads from long-running Python services.
 A typical use case is exposing the final products of a data pipeline 
 via a REST API, where request latency should stay predictable.
 
-A typical use case is exposing final products of a data pipeline hosted on
-Azure Databricks via a REST API, where request latency should stay predictable.
-
  > **Note**: The efficiency is achieved by using Rust-based loading of Delta tables through [delta-rs](https://github.com/delta-io/delta-rs)
  > and automatic incremental caching of Delta transaction logs.
 
@@ -97,10 +94,17 @@ SQL warehouse or cluster:
 
 ## Writing to Delta tables
 
-Writing to Delta tables is currently **not supported** by this package.
-The main reasons are:
-* it is much harder to support write use cases in general
+deltabridge is **read-focused**: it provides no write API, and its optimizations don't apply to writes. This is deliberate:
+* write use cases are more varied and harder to abstract well - appends, overwrites, merges/upserts, schema evolution and concurrency control all behave differently
 * writes are typically handled upstream by the systems that produce the tables (often Spark/PySpark pipelines)
+
+Writing is still possible: `load_as_delta()` returns a [`deltalake.DeltaTable`](https://delta-io.github.io/delta-rs/) with deltabridge's auth already configured, which you can pass to `deltalake`'s write API:
+
+```python
+import deltalake
+
+deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
+```
 
 ## Cloud provider support
 Object storage support currently covers Azure Blob Storage (plus the local 
