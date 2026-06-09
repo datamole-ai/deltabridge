@@ -1,12 +1,12 @@
 # deltabridge
-Thin Python wrapper for reading Delta tables from Azure Blob Storage with low
-and stable latency. Optimized for repeated reads from long-running Python
-services. No Databricks SQL endpoint or Databricks cluster required.
+Thin Python wrapper for reading Delta tables from object storage (currently 
+Azure Blob Storage) or a local filesystem, with low and stable latency. 
+Optimized for repeated reads from long-running Python services.
+A typical use case is exposing the final products of a data pipeline 
+via a REST API, where request latency should stay predictable.
 
 A typical use case is exposing final products of a data pipeline hosted on
 Azure Databricks via a REST API, where request latency should stay predictable.
-
-Access to Delta tables stored on a local filesystem is also supported.
 
  > **Note**: The efficiency is achieved by using Rust-based loading of Delta tables through [delta-rs](https://github.com/delta-io/delta-rs)
  > and automatic incremental caching of Delta transaction logs.
@@ -86,23 +86,22 @@ table_df = table_client.load_as_polars().collect()
 print(table_df)
 ```
 
-### With Delta tables stored in Azure Databricks Delta Lake
-To use this package to load tables stored in Azure Databricks Delta Lake:
-* Specify the storage in location (in Azure Blob Storage) where the table
-is stored as the table URI.
-    * This can be found for example in the Databricks Catalog Explorer UI under *Details* of a table.
-* The reading identity has to have at least *Storage Blob Data Reader* permission
-on the storage location (storage account/container).
+### Databricks tables
+If your Delta tables are managed by Databricks (Unity Catalog), they are 
+still stored as ordinary Delta tables in object storage. Deltabridge can read 
+them directly from the storage, so you can access them without a Databricks 
+SQL warehouse or cluster:
+* Use the table's storage location (in Azure Blob Storage) as the table URI.
+    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
+* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
 
 ## Writing to Delta tables
 
 Writing to Delta tables is currently **not supported** by this package.
-The main reason are:
+The main reasons are:
 * it is much harder to support write use cases in general
-* most current write use cases run in pipelines hosted on Databricks,
-  with spark/pyspark being used for writes
+* writes are typically handled upstream by the systems that produce the tables (often Spark/PySpark pipelines)
 
 ## Cloud provider support
-The package is focused on Delta tables stored in Azure Blob Storage.
-However, it is designed to be easily extensible to support storage offerings
-from different cloud providers.
+Object storage support currently covers Azure Blob Storage (plus the local 
+filesystem).

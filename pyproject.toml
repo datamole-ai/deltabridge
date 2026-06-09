@@ -5,7 +5,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 description = "Thin Python wrapper for reading Delta tables from Azure Blob Storage with low and stable latency."
 authors = [
-    {name = "Datamole (Hellen Team)", email = "hellen@datamole.ai"}
+    {name = "Juraj Pall", email = "juraj.pall@datamole.ai"},
+    {name = "Michal Belak", email = "michal.belak@datamole.ai"},
+    {name = "Jan Lukany", email = "jan.lukany@datamole.ai"}
 ]
 requires-python = ">=3.11,<3.15"
 dependencies = [
