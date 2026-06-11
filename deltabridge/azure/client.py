@@ -5,7 +5,7 @@ from datetime import datetime
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.identity import ChainedTokenCredential, DefaultAzureCredential
 
-from dtml.delta.base_delta_client import BaseDeltaClient
+from deltabridge.base_delta_client import BaseDeltaClient
 
 
 class AzureDeltaClient(BaseDeltaClient):

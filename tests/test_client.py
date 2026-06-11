@@ -8,7 +8,8 @@ from deltalake import DeltaTable
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
-from dtml.delta.client import DeltaTableClient, PartitionFilterOperator
+from deltabridge import PartitionFilterOperator
+from deltabridge.client import DeltaTableClient
 
 
 @pytest.fixture

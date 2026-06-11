@@ -1,16 +1,26 @@
-# core-tools-delta-client
-Thin wrapper for accessing Delta tables stored in Azure Blob Storage in Python.
+# deltabridge
+Thin Python wrapper for reading Delta tables from object storage (currently 
+Azure Blob Storage) or a local filesystem, with low and stable latency. 
+Optimized for repeated reads from long-running Python services.
+A typical use case is exposing the final products of a data pipeline 
+via a REST API, where request latency should stay predictable.
 
-Use this package if you need to read Delta tables stored in Azure Blob Storage
-using Python without depending on services provided by Databricks
-(SQL endpoints, general-purpose compute).
+ > **Note**: The efficiency is achieved by using Rust-based loading of Delta tables through [delta-rs](https://github.com/delta-io/delta-rs)
+ > and automatic incremental caching of Delta transaction logs.
 
-A typical use case is exposing final products of a data pipeline (hosted
-on Azure Databricks) in a REST API.
+## Installation
 
-Access to Delta tables stored on local filesystem is also supported.
+```bash
+pip install deltabridge
+```
 
-## 🚀 Usage
+Or, with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv add deltabridge
+```
+
+## Usage
 
 ### Examples
 
@@ -22,10 +32,11 @@ import os
 import deltalake
 import polars as pl
 
-from dtml.delta.azure.client import AzureDeltaClient
+from deltabridge import PartitionFilterOperator
+from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
-table_client = AzureDeltaClient.get_table_client(
+table_client = azure_delta_client.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 
@@ -36,6 +47,16 @@ delta_table: deltalake.DeltaTable = table_client.load_as_delta()
 table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
+
+# For partitioned tables, push filters down to the partition columns so that
+# only matching partitions are read from storage (avoiding a full scan).
+# Multiple partition filters are combined using the logical AND operator.
+table_df = table_client.load_as_polars(
+    partition_filter=[
+        ('country', PartitionFilterOperator.IN, ['CZ', 'SK']),
+        ('year', PartitionFilterOperator.EQUAL, '2024'),
+    ],
+).collect()
 ```
 
 #### Local filesystem
@@ -43,7 +64,7 @@ table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 ```python
 import polars as pl
 
-from dtml.delta.local.client import LocalDeltaClient
+from deltabridge.local import LocalDeltaClient
 
 MY_TABLE_PATH = '/tmp/my_table'
 
@@ -56,39 +77,35 @@ local_delta_client = LocalDeltaClient()
 table_client = local_delta_client.get_table_client(
     table_uri=MY_TABLE_PATH  # File path can be used as table URI
 )
+
+# Load the data as a Polars LazyFrame and collect it into a DataFrame
+table_df = table_client.load_as_polars().collect()
+print(table_df)
 ```
 
-### With Delta tables stored in Azure Databricks Delta Lake
-To use this package to load tables stored in Azure Databricks Delta Lake:
-* Specify the storage in location (in Azure Blob Storage) where the table
-is stored as the table URI.
-    * This can be found for example in the Databricks Catalog Explorer UI under *Details* of a table.
-* The reading identity has to have at least *Storage Blob Data Reader* permission
-on the storage location (storage account/container).
+### Databricks tables
+If your Delta tables are managed by Databricks (Unity Catalog), they are 
+still stored as ordinary Delta tables in object storage. Deltabridge can read 
+them directly from the storage, so you can access them without a Databricks 
+SQL warehouse or cluster:
+* Use the table's storage location (in Azure Blob Storage) as the table URI.
+    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
+* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
 
- > **Note**: Delta tables with deletion vectors enabled cannot be accessed using this package.
- > We recommend disabling the feature on tables which are to be read using this package.
- > This a limitation of the upstream `deltalake` library (a Python wrapper of `delta-rs`).
- > See https://github.com/delta-io/delta-rs/issues/1094
+## Writing to Delta tables
 
-## ✍️ Writing to Delta tables
+deltabridge is **read-focused**: it provides no write API, and its optimizations don't apply to writes. This is deliberate:
+* write use cases are more varied and harder to abstract well - appends, overwrites, merges/upserts, schema evolution and concurrency control all behave differently
+* writes are typically handled upstream by the systems that produce the tables (often Spark/PySpark pipelines)
 
-Writing to Delta tables is currently **not supported** by this package.
-The main reason are:
-* it is much harder to support write use cases in general
-* most current write use cases run in pipelines hosted on Databricks,
-  with spark/pyspark being used for writes
+Writing is still possible: `load_as_delta()` returns a [`deltalake.DeltaTable`](https://delta-io.github.io/delta-rs/) with deltabridge's auth already configured, which you can pass to `deltalake`'s write API:
 
-However, feel free to contact ML Engineering Team if you have a use case where write support would be beneficial.
+```python
+import deltalake
 
-## ☁️ Cloud provider support
-The package is focused on Delta tables stored in Azure Blob Storage.
-However, it is designed to be easily extensible to support storage offerings
-from different cloud providers.
+deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
+```
 
-
-## ✨ Delta to HTTP
-
-A ready-made general-purpose Docker image exposing Delta tables via a HTTP
-using this package is in progress. Stay tuned!
-
+## Cloud provider support
+Object storage support currently covers Azure Blob Storage (plus the local 
+filesystem).

@@ -110,5 +110,3 @@ databricks.yml
 **/notebooks_scripts
 
 .DS_Store
-
-uv.lock

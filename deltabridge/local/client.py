@@ -1,4 +1,4 @@
-from dtml.delta.base_delta_client import BaseDeltaClient
+from deltabridge.base_delta_client import BaseDeltaClient
 
 
 class LocalDeltaClient(BaseDeltaClient):
