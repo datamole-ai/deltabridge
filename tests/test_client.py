@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -123,3 +124,54 @@ def test_load_invalid_partition_filter(temp_delta_table_uri):
         delta_table_client.load_as_polars(
             partition_filter=[('id', 'invalid', '2')],
         )
+
+
+def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):
+    options = {'token': 'old'}
+    client = DeltaTableClient(
+        table_uri=temp_delta_table_uri,
+        storage_options_fn=lambda: dict(options),
+    )
+    new_table = mocker.Mock(spec=DeltaTable)
+    mocker.patch.object(client, '_create_delta_table', return_value=new_table)
+
+    options['token'] = 'new'
+    result = client.load_as_delta()
+
+    assert result is new_table
+    assert client._delta_table is new_table
+    assert client._storage_options == {'token': 'new'}
+    # The rebuild must use the REFRESHED options, not the stale ones.
+    client._create_delta_table.assert_called_once_with({'token': 'new'})
+
+
+def test_storage_options_rotation_failed_rebuild_keeps_previous_state(
+    temp_delta_table_uri, mocker, caplog
+):
+    options = {'token': 'old'}
+    client = DeltaTableClient(
+        table_uri=temp_delta_table_uri,
+        storage_options_fn=lambda: dict(options),
+    )
+    original_table = client._delta_table
+    new_table = mocker.Mock(spec=DeltaTable)
+    mocker.patch.object(
+        client,
+        '_create_delta_table',
+        side_effect=[ConnectionError('transient'), new_table],
+    )
+
+    options['token'] = 'new'
+
+    # First call: rebuild fails -> old table served, state unchanged
+    with caplog.at_level(logging.WARNING):
+        result = client.load_as_delta()
+    assert result is original_table
+    assert client._storage_options == {'token': 'old'}
+    assert 'retrying on next read' in caplog.text
+
+    # Second call: rebuild succeeds -> new table committed
+    result = client.load_as_delta()
+    assert result is new_table
+    assert client._storage_options == {'token': 'new'}
+    assert client._create_delta_table.call_count == 2

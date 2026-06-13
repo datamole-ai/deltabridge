@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 from typing import Any, Callable
 
 import polars as pl
 from deltalake import DeltaTable
+
+logger = logging.getLogger(__name__)
 
 
 class PartitionFilterOperator(StrEnum):
@@ -28,6 +31,10 @@ class DeltaTableClient:
     `get_table_client` of a class derived from `BaseDeltaClient` to
     get a client for a specific storage provider.
 
+    If rebuilding the table with rotated credentials fails transiently,
+    the previous table is served for that read and the rebuild is
+    retried on the next call.
+
     Parameters
     ----------
     table_uri: str
@@ -46,23 +53,42 @@ class DeltaTableClient:
         self._table_uri = table_uri
         self._storage_options_fn = storage_options_fn
         self._storage_options = self._storage_options_fn()
-        self._delta_table = self._create_delta_table()
+        self._delta_table = self._create_delta_table(self._storage_options)
 
-    def _create_delta_table(self) -> DeltaTable:
+    def _create_delta_table(
+        self, storage_options: dict[str, str]
+    ) -> DeltaTable:
         return DeltaTable(
             self._table_uri,
-            storage_options=self._storage_options,
+            storage_options=storage_options,
         )
 
-    def _refresh_table(self) -> None:
+    def _refresh_table(self) -> DeltaTable:
         refreshed_storage_options = self._storage_options_fn()
-        if self._storage_options != refreshed_storage_options:
-            # The storage options have changed -> recreate DeltaTable instance
-            self._storage_options = refreshed_storage_options
-            self._delta_table = self._create_delta_table()
-        else:
+        if self._storage_options == refreshed_storage_options:
             # Update table metadata using existing token
             self._delta_table.update_incremental()
+        else:
+            # Storage options changed -> recreate the DeltaTable.
+            # Commit both attributes only after the rebuild succeeds;
+            # a failed rebuild keeps the previous consistent state so
+            # the next call retries, while this read is served from the
+            # previous table (its token stays valid briefly after
+            # rotation).
+            try:
+                self._delta_table = self._create_delta_table(
+                    refreshed_storage_options
+                )
+                self._storage_options = refreshed_storage_options
+            except Exception:
+                logger.warning(
+                    'Failed to recreate Delta table %r with refreshed '
+                    'storage options; serving the previous table and '
+                    'retrying on next read.',
+                    self._table_uri,
+                    exc_info=True,
+                )
+        return self._delta_table
 
     def load_as_delta(self) -> DeltaTable:
         """Load a Delta table.
@@ -72,8 +98,7 @@ class DeltaTableClient:
         DeltaTable
             A DeltaTable object representing the loaded table.
         """
-        self._refresh_table()
-        return self._delta_table
+        return self._refresh_table()
 
     def load_as_polars(
         self,
