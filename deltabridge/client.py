@@ -58,17 +58,12 @@ class DeltaTableClient:
 
     def _refresh_table(self) -> None:
         refreshed_storage_options = self._storage_options_fn()
-        if self._storage_options == refreshed_storage_options:
-            # Update table metadata using existing token
-            self._delta_table.update_incremental()
-        else:
-            # Storage options changed -> recreate the DeltaTable.
-            # Build with the refreshed options first and commit both
-            # attributes only on success, so a failed rebuild propagates
-            # while leaving the previous consistent state intact.
+        if self._storage_options != refreshed_storage_options:
             delta_table = self._create_delta_table(refreshed_storage_options)
             self._storage_options = refreshed_storage_options
             self._delta_table = delta_table
+        else:
+            self._delta_table.update_incremental()
 
     def load_as_delta(self) -> DeltaTable:
         """Load a Delta table.
