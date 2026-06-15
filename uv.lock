@@ -335,6 +335,7 @@ version = "0"
 source = { editable = "." }
 dependencies = [
     { name = "azure-identity" },
+    { name = "deltalake" },
     { name = "polars", extra = ["deltalake", "pyarrow"] },
 ]
 
@@ -348,6 +349,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "azure-identity", specifier = ">=1.17.1" },
+    { name = "deltalake", specifier = ">=1.6.0" },
     { name = "polars", extras = ["deltalake", "pyarrow"], specifier = ">=1.14.0,<2.0.0" },
 ]
 
