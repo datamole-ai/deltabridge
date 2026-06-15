@@ -144,9 +144,7 @@ def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):
     client._create_delta_table.assert_called_once_with({'token': 'new'})
 
 
-def test_storage_options_rotation_failed_rebuild_keeps_previous_state(
-    temp_delta_table_uri, mocker
-):
+def test_storage_options_rotation_failed_rebuild(temp_delta_table_uri, mocker):
     options = {'token': 'old'}
     client = DeltaTableClient(
         table_uri=temp_delta_table_uri,
