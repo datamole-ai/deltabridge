@@ -1,3 +1,4 @@
+import json
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -5,10 +6,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 from deltalake import DeltaTable
+from deltalake.exceptions import DeltaProtocolError
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
-from deltabridge import PartitionFilterOperator
 from deltabridge.client import DeltaTableClient
 
 
@@ -65,67 +66,131 @@ def test_load_as_polars(temp_delta_table_uri, sample_df):
     )
 
 
-@pytest.mark.parametrize(
-    ('partition_filter', 'expected_filter'),
-    [
-        (
-            [],
-            lambda df: df,
-        ),
-        (
-            [
-                ('id', PartitionFilterOperator.EQUAL, '2'),
-                ('value', '=', 'c'),  # Test with string literal
-            ],
-            lambda df: df.filter(
-                (pl.col('id') == 2) & (pl.col('value') == 'c')
-            ),
-        ),
-        (
-            [('id', PartitionFilterOperator.IN, ['2', '3'])],
-            lambda df: df.filter(pl.col('id').is_in([2, 3])),
-        ),
-        (
-            [('value', PartitionFilterOperator.NOT_IN, ['b', 'c'])],
-            lambda df: df.filter(~pl.col('value').is_in(['b', 'c'])),
-        ),
-        (
-            [('id', PartitionFilterOperator.NOT_EQUAL, '2')],
-            lambda df: df.filter(pl.col('id') != 2),
-        ),
-    ],
-    ids=['empty', 'eq', 'in', 'not-in', 'not-eq'],
-)
-def test_load_as_polars_with_partition_operators(
-    temp_delta_table_uri, sample_df, partition_filter, expected_filter
+@pytest.fixture
+def deletion_vector_table_uri():
+    # delta-rs cannot *write* deletion-vector tables, so we generate a
+    # normal table and rewrite its protocol action to advertise the
+    # `deletionVectors` reader feature (reader v3). This reproduces the
+    # protocol gate that modern Databricks (Unity Catalog) tables hit:
+    # the legacy pyarrow scan path rejects such tables, the native path
+    # accepts them.
+    df = pl.DataFrame({'id': [1, 2, 3, 4], 'value': ['a', 'b', 'c', 'd']})
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_deltalake(tmpdir, df)
+        log_dir = Path(tmpdir) / '_delta_log'
+        first_commit = sorted(log_dir.glob('*.json'))[0]
+        patched = []
+        for line in first_commit.read_text().splitlines():
+            action = json.loads(line)
+            if 'protocol' in action:
+                action['protocol'] = {
+                    'minReaderVersion': 3,
+                    'minWriterVersion': 7,
+                    'readerFeatures': ['deletionVectors'],
+                    'writerFeatures': ['deletionVectors'],
+                }
+            patched.append(json.dumps(action))
+        first_commit.write_text('\n'.join(patched) + '\n')
+        yield tmpdir
+
+
+def test_load_as_polars_reads_deletion_vector_table(
+    deletion_vector_table_uri,
 ):
+    # The native path used by load_as_polars reads the deletion-vector
+    # table that the legacy pyarrow scan path rejects with a
+    # DeltaProtocolError. This guards against regressing to use_pyarrow.
     delta_table_client = DeltaTableClient(
-        table_uri=temp_delta_table_uri,
+        table_uri=deletion_vector_table_uri,
         storage_options_fn=lambda: {},
     )
-    loaded_df = (
-        delta_table_client.load_as_polars(
-            partition_filter=partition_filter,
-        )
-        .sort('id', 'value')
-        .collect()
+    loaded_df = delta_table_client.load_as_polars().collect()
+    assert loaded_df.height == 4
+
+
+@pytest.fixture
+def column_mapping_table_uri():
+    # delta-rs cannot *write* column-mapping tables, so we write the parquet
+    # under physical column names and rewrite the log to map logical names
+    # (`id`, `value`) to them, enabling `columnMapping` (reader v3). This is a
+    # faithful column-mapping table: physical names differ from logical names.
+    df = pl.DataFrame({'col-aaaa': [1, 2, 3], 'col-bbbb': ['a', 'b', 'c']})
+    schema = json.dumps(
+        {
+            'type': 'struct',
+            'fields': [
+                {
+                    'name': 'id',
+                    'type': 'long',
+                    'nullable': True,
+                    'metadata': {
+                        'delta.columnMapping.id': 1,
+                        'delta.columnMapping.physicalName': 'col-aaaa',
+                    },
+                },
+                {
+                    'name': 'value',
+                    'type': 'string',
+                    'nullable': True,
+                    'metadata': {
+                        'delta.columnMapping.id': 2,
+                        'delta.columnMapping.physicalName': 'col-bbbb',
+                    },
+                },
+            ],
+        }
     )
-    correct_partition_df = expected_filter(sample_df).sort('id', 'value')
-    assert_frame_equal(
-        loaded_df,
-        correct_partition_df,
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_deltalake(tmpdir, df)
+        log_dir = Path(tmpdir) / '_delta_log'
+        first_commit = sorted(log_dir.glob('*.json'))[0]
+        patched = []
+        for line in first_commit.read_text().splitlines():
+            action = json.loads(line)
+            if 'protocol' in action:
+                action['protocol'] = {
+                    'minReaderVersion': 3,
+                    'minWriterVersion': 7,
+                    'readerFeatures': ['columnMapping'],
+                    'writerFeatures': ['columnMapping'],
+                }
+            if 'metaData' in action:
+                action['metaData']['schemaString'] = schema
+                action['metaData'].setdefault('configuration', {}).update(
+                    {
+                        'delta.columnMapping.mode': 'name',
+                        'delta.columnMapping.maxColumnId': '2',
+                    }
+                )
+            patched.append(json.dumps(action))
+        first_commit.write_text('\n'.join(patched) + '\n')
+        yield tmpdir
+
+
+def test_scan_delta_yields_null_columns_without_guard(
+    column_mapping_table_uri,
+):
+    # Justifies the guard: passing a DeltaTable to scan_delta bypasses polars'
+    # protocol check, so a column-mapping table is read as all-null columns
+    # (the logical names are absent from the physically-named parquet).
+    loaded_df = pl.scan_delta(DeltaTable(column_mapping_table_uri)).collect()
+    assert loaded_df.height == 3
+    assert all(
+        loaded_df[c].null_count() == loaded_df.height
+        for c in loaded_df.columns
     )
 
 
-def test_load_invalid_partition_filter(temp_delta_table_uri):
+def test_load_as_polars_rejects_unsupported_reader_feature(
+    column_mapping_table_uri,
+):
+    # The guard turns the silent-null read above into a clear error.
     delta_table_client = DeltaTableClient(
-        table_uri=temp_delta_table_uri,
+        table_uri=column_mapping_table_uri,
         storage_options_fn=lambda: {},
     )
-    with pytest.raises(ValueError):
-        delta_table_client.load_as_polars(
-            partition_filter=[('id', 'invalid', '2')],
-        )
+    with pytest.raises(DeltaProtocolError, match='columnMapping'):
+        delta_table_client.load_as_polars()
 
 
 def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):

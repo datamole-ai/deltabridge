@@ -32,7 +32,6 @@ import os
 import deltalake
 import polars as pl
 
-from deltabridge import PartitionFilterOperator
 from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
@@ -48,15 +47,13 @@ table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 
-# For partitioned tables, push filters down to the partition columns so that
-# only matching partitions are read from storage (avoiding a full scan).
-# Multiple partition filters are combined using the logical AND operator.
-table_df = table_client.load_as_polars(
-    partition_filter=[
-        ('country', PartitionFilterOperator.IN, ['CZ', 'SK']),
-        ('year', PartitionFilterOperator.EQUAL, '2024'),
-    ],
-).collect()
+table_df = (
+    table_client.load_as_polars()
+    .filter(
+        pl.col('country').is_in(['CZ', 'SK']) & (pl.col('year') == 2024)
+    )
+    .collect()
+)
 ```
 
 #### Local filesystem

@@ -18,7 +18,9 @@ dependencies = [
     # introduced a memory regression (delta-io/delta-rs#4422) that was
     # only fixed in 1.6.0.
     "deltalake>=1.6.0",
-    "polars[deltalake,pyarrow]>=1.14.0,<2.0.0"
+    # polars gained deletion-vector read support in polars 1.40.0
+    # (pola-rs/polars#26867);
+    "polars[deltalake]>=1.40.0,<2.0.0"
 ]
 readme = "README.md"
 keywords = [
