@@ -1,4 +1,3 @@
-import logging
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -146,7 +145,7 @@ def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):
 
 
 def test_storage_options_rotation_failed_rebuild_keeps_previous_state(
-    temp_delta_table_uri, mocker, caplog
+    temp_delta_table_uri, mocker
 ):
     options = {'token': 'old'}
     client = DeltaTableClient(
@@ -163,12 +162,11 @@ def test_storage_options_rotation_failed_rebuild_keeps_previous_state(
 
     options['token'] = 'new'
 
-    # First call: rebuild fails -> old table served, state unchanged
-    with caplog.at_level(logging.WARNING):
-        result = client.load_as_delta()
-    assert result is original_table
+    # First call: rebuild fails -> error propagates, state unchanged
+    with pytest.raises(ConnectionError):
+        client.load_as_delta()
+    assert client._delta_table is original_table
     assert client._storage_options == {'token': 'old'}
-    assert 'retrying on next read' in caplog.text
 
     # Second call: rebuild succeeds -> new table committed
     result = client.load_as_delta()
