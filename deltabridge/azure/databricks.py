@@ -148,14 +148,9 @@ class _TableCredentialVendor:
 def _to_storage_options(credentials: dict[str, Any]) -> dict[str, str]:
     """Map vended Unity Catalog credentials to delta-rs storage options."""
     if 'azure_user_delegation_sas' not in credentials:
-        # An Azure workspace vends an Azure SAS; anything else is an
-        # unexpected response for this Azure-only client.
         raise ValueError(
             'Vended Unity Catalog credentials did not contain an Azure '
             'user-delegation SAS (azure_user_delegation_sas).'
         )
     sas_token = credentials['azure_user_delegation_sas']['sas_token']
-    # `azure_storage_sas_key` is object_store's Azure SAS config key.
-    # The SAS token is passed as returned (already percent-encoded,
-    # without a leading '?').
     return {'azure_storage_sas_key': sas_token}
