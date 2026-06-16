@@ -45,7 +45,10 @@ def test_load_as_delta(temp_delta_table_uri):
     assert isinstance(loaded_delta_table, DeltaTable)
     # delta-rs started prefixing file:// to the table URI in an unknwon version
     # removing the prefix ensures compatibility with both old and new versions
-    assert Path(loaded_delta_table.table_uri.replace('file:', '')) == Path(
+    # samefile() compares by inode, so symlinked temp dirs
+    # (e.g. macOS /var -> /private/var) still match instead of needing
+    # identical textual paths.
+    assert Path(loaded_delta_table.table_uri.replace('file:', '')).samefile(
         temp_delta_table_uri
     )
 
