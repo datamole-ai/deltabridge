@@ -84,13 +84,54 @@ print(table_df)
 ```
 
 ### Databricks tables
-If your Delta tables are managed by Databricks (Unity Catalog), they are 
-still stored as ordinary Delta tables in object storage. Deltabridge can read 
-them directly from the storage, so you can access them without a Databricks 
-SQL warehouse or cluster:
-* Use the table's storage location (in Azure Blob Storage) as the table URI.
-    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
-* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
+
+Databricks tables are stored as ordinary Delta tables in cloud object storage,
+so deltabridge can read them without a Databricks SQL warehouse or cluster -
+either through Unity Catalog credential vending (recommended) or by reading the
+storage location directly.
+
+For tables governed by Unity Catalog, the recommended approach is *credential
+vending*: rather than relying on standing storage-level access, Unity Catalog
+issues scoped, short-lived credentials for the specific table (see Databricks'
+[temporary table credentials](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending)).
+It works for managed and external Delta tables registered in Unity Catalog.
+deltabridge implements this for Azure in `AzureDatabricksDeltaClient`, which
+reads a table by its full name and refreshes the vended credentials
+automatically before they expire:
+
+```python
+import polars as pl
+
+from deltabridge.azure import AzureDatabricksDeltaClient
+
+databricks_client = AzureDatabricksDeltaClient(
+    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
+)
+table_client = databricks_client.get_table_client('catalog.schema.table')
+
+table_df = table_client.load_as_polars().collect()
+```
+
+The Databricks REST API is authenticated with a Microsoft Entra ID token
+obtained via [`DefaultAzureCredential`](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential)
+(managed identity, Azure CLI, a service principal, ...); pass a custom
+`credential` to override it. This requires, on the Databricks side:
+
+* external data access enabled on the metastore.
+* that identity registered as a workspace principal with the
+  `EXTERNAL USE SCHEMA` privilege on the schema (or parent catalog).
+* a table without row filters or column masks (views and masked tables are
+  rejected by credential vending).
+
+If credential vending isn't possible - for example the table isn't in Unity
+Catalog (such as a legacy Hive metastore table), or external data access isn't
+enabled on the metastore - you can instead read the table's storage location
+directly with the Delta client for the underlying cloud (Azure, AWS, or GCP;
+though only Azure's [`AzureDeltaClient`](#azure) is implemented in deltabridge
+today).
+Find the storage location in the Databricks Catalog Explorer UI under the table's
+*Details*; the reading identity needs at least the *Storage Blob Data Reader*
+role on the storage account / container.
 
 ## Writing to Delta tables
 

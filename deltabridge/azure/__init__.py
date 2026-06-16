@@ -1,1 +1,2 @@
 from deltabridge.azure.client import AzureDeltaClient
+from deltabridge.azure.databricks import AzureDatabricksDeltaClient
