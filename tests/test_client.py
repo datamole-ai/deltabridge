@@ -10,6 +10,7 @@ from deltalake.exceptions import DeltaProtocolError
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
+from deltabridge import PartitionFilterOperator
 from deltabridge.client import DeltaTableClient
 
 
@@ -66,14 +67,75 @@ def test_load_as_polars(temp_delta_table_uri, sample_df):
     )
 
 
+@pytest.mark.parametrize(
+    ('partition_filter', 'expected_filter'),
+    [
+        (
+            [],
+            lambda df: df,
+        ),
+        (
+            [
+                ('id', PartitionFilterOperator.EQUAL, '2'),
+                ('value', '=', 'c'),  # Test with string literal
+            ],
+            lambda df: df.filter(
+                (pl.col('id') == 2) & (pl.col('value') == 'c')
+            ),
+        ),
+        (
+            [('id', PartitionFilterOperator.IN, ['2', '3'])],
+            lambda df: df.filter(pl.col('id').is_in([2, 3])),
+        ),
+        (
+            [('value', PartitionFilterOperator.NOT_IN, ['b', 'c'])],
+            lambda df: df.filter(~pl.col('value').is_in(['b', 'c'])),
+        ),
+        (
+            [('id', PartitionFilterOperator.NOT_EQUAL, '2')],
+            lambda df: df.filter(pl.col('id') != 2),
+        ),
+    ],
+    ids=['empty', 'eq', 'in', 'not-in', 'not-eq'],
+)
+def test_load_as_polars_with_partition_operators(
+    temp_delta_table_uri, sample_df, partition_filter, expected_filter
+):
+    delta_table_client = DeltaTableClient(
+        table_uri=temp_delta_table_uri,
+        storage_options_fn=lambda: {},
+    )
+    loaded_df = (
+        delta_table_client.load_as_polars(partition_filter=partition_filter)
+        .sort('id', 'value')
+        .collect()
+    )
+
+    correct_partition_df = expected_filter(sample_df).sort('id', 'value')
+    assert_frame_equal(
+        loaded_df,
+        correct_partition_df,
+    )
+
+
+def test_load_invalid_partition_filter(temp_delta_table_uri):
+    delta_table_client = DeltaTableClient(
+        table_uri=temp_delta_table_uri,
+        storage_options_fn=lambda: {},
+    )
+    with pytest.raises(ValueError):
+        delta_table_client.load_as_polars(
+            partition_filter=[('id', 'invalid', '2')],
+        )
+
+
 @pytest.fixture
 def deletion_vector_table_uri():
     # delta-rs cannot *write* deletion-vector tables, so we generate a
     # normal table and rewrite its protocol action to advertise the
     # `deletionVectors` reader feature (reader v3). This reproduces the
     # protocol gate that modern Databricks (Unity Catalog) tables hit:
-    # the legacy pyarrow scan path rejects such tables, the native path
-    # accepts them.
+    # the pyarrow scan path rejects such tables, the native path accepts them.
     df = pl.DataFrame({'id': [1, 2, 3, 4], 'value': ['a', 'b', 'c', 'd']})
     with tempfile.TemporaryDirectory() as tmpdir:
         write_deltalake(tmpdir, df)
@@ -97,15 +159,32 @@ def deletion_vector_table_uri():
 def test_load_as_polars_reads_deletion_vector_table(
     deletion_vector_table_uri,
 ):
-    # The native path used by load_as_polars reads the deletion-vector
-    # table that the legacy pyarrow scan path rejects with a
-    # DeltaProtocolError. This guards against regressing to use_pyarrow.
+    # The default load_as_polars() path (no partition_filter) uses the native
+    # reader, which reads deletion-vector tables - unlike the pyarrow path
+    # (partition_filter), which rejects them with a DeltaProtocolError.
     delta_table_client = DeltaTableClient(
         table_uri=deletion_vector_table_uri,
         storage_options_fn=lambda: {},
     )
     loaded_df = delta_table_client.load_as_polars().collect()
     assert loaded_df.height == 4
+
+
+def test_partition_filter_rejects_deletion_vector_table(
+    deletion_vector_table_uri,
+):
+    # The pyarrow partition-pruning path cannot apply deletion vectors, so it
+    # must refuse deletion-vector tables instead of silently returning deleted
+    # rows. The guard fires before any scan, so the fixture need not be
+    # partitioned.
+    delta_table_client = DeltaTableClient(
+        table_uri=deletion_vector_table_uri,
+        storage_options_fn=lambda: {},
+    )
+    with pytest.raises(DeltaProtocolError, match='deletion'):
+        delta_table_client.load_as_polars(
+            partition_filter=[('id', '=', '1')],
+        )
 
 
 @pytest.fixture

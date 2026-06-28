@@ -32,6 +32,7 @@ import os
 import deltalake
 import polars as pl
 
+from deltabridge import PartitionFilterOperator
 from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
@@ -47,6 +48,19 @@ table_ldf: pl.LazyFrame = table_client.load_as_polars()
 # Collect to a Polars DataFrame
 table_df: pl.DataFrame = table_ldf.filter(pl.col('x') > 3).collect()
 
+# For partitioned tables, push filters down to the partition columns so that
+# only matching partitions are read from storage (avoiding a full scan).
+# Multiple partition filters are combined using the logical AND operator.
+table_df = table_client.load_as_polars(
+    partition_filter=[
+        ('country', PartitionFilterOperator.IN, ['CZ', 'SK']),
+        ('year', PartitionFilterOperator.EQUAL, '2024'),
+    ],
+).collect()
+
+# A plain .filter() on the LazyFrame also works, but is less efficient on large
+# partitioned tables on object storage (see "Partition pruning on large tables"
+# below). It is, however, the only option for deletion-vector tables.
 table_df = (
     table_client.load_as_polars()
     .filter(
@@ -78,6 +92,41 @@ table_client = local_delta_client.get_table_client(
 # Load the data as a Polars LazyFrame and collect it into a DataFrame
 table_df = table_client.load_as_polars().collect()
 print(table_df)
+```
+
+### Partition pruning on large tables
+
+By default `load_as_polars()` uses Polars' native Delta reader, which reads
+deletion-vector tables (e.g. modern Databricks/Unity Catalog tables) but does
+not prune partitions efficiently ([pola-rs/polars#20998](https://github.com/pola-rs/polars/issues/20998)):
+it skips the *data* of non-matching partitions, yet still handles per-file
+metadata for every partition when building the scan. On object storage that
+per-file step is a network request, so reading a few partitions of a table with
+*many* partitions can become very slow.
+
+For that case, pass `partition_filter` to read via pyarrow, which pushes the
+partition predicate into delta-rs's file enumeration so non-matching partitions
+are never touched:
+
+```python
+from deltabridge import PartitionFilterOperator
+
+# Fast on tables with many partitions: only the matching partitions are listed.
+df = table_client.load_as_polars(
+    partition_filter=[
+        ('country', PartitionFilterOperator.EQUAL, 'CZ'),
+        ('year', '=', '2024'),
+    ]
+).collect()
+```
+
+Trade-off: the pyarrow reader **cannot read deletion-vector tables** and raises
+`DeltaProtocolError` for them, so `partition_filter` is not usable on such a
+table. Read those natively instead and filter the returned `LazyFrame` with
+Polars expressions:
+
+```python
+df = table_client.load_as_polars().filter(pl.col('country') == 'CZ').collect()
 ```
 
 ### Databricks tables

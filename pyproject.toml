@@ -19,8 +19,9 @@ dependencies = [
     # only fixed in 1.6.0.
     "deltalake>=1.6.0",
     # polars gained deletion-vector read support in polars 1.40.0
-    # (pola-rs/polars#26867);
-    "polars[deltalake]>=1.40.0,<2.0.0"
+    # (pola-rs/polars#26867); the pyarrow extra backs the partition-pruning
+    # path of load_as_polars (pl.scan_delta(use_pyarrow=True)).
+    "polars[deltalake,pyarrow]>=1.40.0,<2.0.0"
 ]
 readme = "README.md"
 keywords = [
@@ -56,6 +57,14 @@ dev = [
     "pytest~=8.4",
     "pytest-mock~=3.8",
     "ruff~=0.11",
+]
+
+[tool.pytest.ini_options]
+# The benchmark marker gates an opt-in wall-clock comparison; deselect it by
+# default so normal runs stay fast. Run it with `pytest -m benchmark -s`.
+addopts = "-m 'not benchmark'"
+markers = [
+    "benchmark: opt-in partition-pruning speed comparison (deselected by default)",
 ]
 
 [tool.ruff]
