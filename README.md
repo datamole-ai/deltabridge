@@ -57,6 +57,17 @@ table_df = table_client.load_as_polars(
         ('year', PartitionFilterOperator.EQUAL, '2024'),
     ],
 ).collect()
+
+# A plain .filter() on the LazyFrame also works, but is less efficient on large
+# partitioned tables on object storage (see "Partition pruning on large tables"
+# below). It is, however, the only option for deletion-vector tables.
+table_df = (
+    table_client.load_as_polars()
+    .filter(
+        pl.col('country').is_in(['CZ', 'SK']) & (pl.col('year') == 2024)
+    )
+    .collect()
+)
 ```
 
 #### Local filesystem
@@ -81,6 +92,41 @@ table_client = local_delta_client.get_table_client(
 # Load the data as a Polars LazyFrame and collect it into a DataFrame
 table_df = table_client.load_as_polars().collect()
 print(table_df)
+```
+
+### Partition pruning on large tables
+
+By default `load_as_polars()` uses Polars' native Delta reader, which reads
+deletion-vector tables (e.g. modern Databricks/Unity Catalog tables) but does
+not prune partitions efficiently ([pola-rs/polars#20998](https://github.com/pola-rs/polars/issues/20998)):
+it skips the *data* of non-matching partitions, yet still handles per-file
+metadata for every partition when building the scan. On object storage that
+per-file step is a network request, so reading a few partitions of a table with
+*many* partitions can become very slow.
+
+For that case, pass `partition_filter` to read via pyarrow, which pushes the
+partition predicate into delta-rs's file enumeration so non-matching partitions
+are never touched:
+
+```python
+from deltabridge import PartitionFilterOperator
+
+# Fast on tables with many partitions: only the matching partitions are listed.
+df = table_client.load_as_polars(
+    partition_filter=[
+        ('country', PartitionFilterOperator.EQUAL, 'CZ'),
+        ('year', '=', '2024'),
+    ]
+).collect()
+```
+
+Trade-off: the pyarrow reader **cannot read deletion-vector tables** and raises
+`DeltaProtocolError` for them, so `partition_filter` is not usable on such a
+table. Read those natively instead and filter the returned `LazyFrame` with
+Polars expressions:
+
+```python
+df = table_client.load_as_polars().filter(pl.col('country') == 'CZ').collect()
 ```
 
 ### Databricks tables
