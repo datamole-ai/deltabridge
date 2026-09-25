@@ -1,4 +1,4 @@
-name: Test, Lint, Format
+name: Test, Lint, Format, Audit
 
 on: [push]
 
@@ -20,7 +20,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: 0.7.11
+          version-file: .tool-versions
 
       - name: Set up cache
         uses: actions/cache@v4
@@ -39,3 +39,23 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
           uv run pytest .
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version-file: .tool-versions
+
+      - name: Audit dependencies
+        # If an advisory cannot be fixed, see CONTRIBUTING.md#dependency-audit.
+        # Record the reason before adding --ignore GHSA-... here.
+        run: uv audit --locked
