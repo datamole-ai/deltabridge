@@ -5,11 +5,16 @@ from pathlib import Path
 import polars as pl
 import pytest
 from deltalake import DeltaTable
+from deltalake.exceptions import DeltaProtocolError
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
 from deltabridge import PartitionFilterOperator
 from deltabridge.client import DeltaTableClient
+
+# Tables copied from the delta-rs test data (Apache-2.0):
+# https://github.com/delta-io/delta-rs/tree/main/crates/test/tests/data
+DATA_DIR = Path(__file__).parent / 'data'
 
 
 @pytest.fixture
@@ -126,6 +131,16 @@ def test_load_invalid_partition_filter(temp_delta_table_uri):
         delta_table_client.load_as_polars(
             partition_filter=[('id', 'invalid', '2')],
         )
+
+
+def test_load_as_polars_with_column_mapping():
+    # Without the protocol check, the columns would be read as nulls
+    delta_table_client = DeltaTableClient(
+        table_uri=str(DATA_DIR / 'table_with_column_mapping'),
+        storage_options_fn=lambda: {},
+    )
+    with pytest.raises(DeltaProtocolError, match='column mapping'):
+        delta_table_client.load_as_polars()
 
 
 def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):
