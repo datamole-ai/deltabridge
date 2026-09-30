@@ -38,11 +38,12 @@ def temp_delta_table_uri(sample_df):
 
 
 @pytest.fixture
-def column_mapping_table_uri():
+def column_mapping_table_uri(sample_df):
     with tempfile.TemporaryDirectory() as tmpdir:
         write_deltalake(
             tmpdir,
-            pl.DataFrame({'id': [1, 2, 3], 'value': ['a', 'b', 'c']}),
+            # deltalake ignores column mapping for tables with timestamp_ntz
+            sample_df.drop('datetime'),
             configuration={'delta.columnMapping.mode': 'name'},
         )
         yield tmpdir
