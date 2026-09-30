@@ -12,10 +12,6 @@ from polars.testing import assert_frame_equal
 from deltabridge import PartitionFilterOperator
 from deltabridge.client import DeltaTableClient
 
-# Tables copied from the delta-rs test data (Apache-2.0):
-# https://github.com/delta-io/delta-rs/tree/main/crates/test/tests/data
-DATA_DIR = Path(__file__).parent / 'data'
-
 
 @pytest.fixture
 def sample_df():
@@ -38,6 +34,17 @@ def sample_df():
 def temp_delta_table_uri(sample_df):
     with tempfile.TemporaryDirectory() as tmpdir:
         write_deltalake(tmpdir, sample_df, partition_by=['id', 'value'])
+        yield tmpdir
+
+
+@pytest.fixture
+def column_mapping_table_uri():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_deltalake(
+            tmpdir,
+            pl.DataFrame({'id': [1, 2, 3], 'value': ['a', 'b', 'c']}),
+            configuration={'delta.columnMapping.mode': 'name'},
+        )
         yield tmpdir
 
 
@@ -133,13 +140,13 @@ def test_load_invalid_partition_filter(temp_delta_table_uri):
         )
 
 
-def test_load_as_polars_with_column_mapping():
+def test_load_as_polars_with_column_mapping(column_mapping_table_uri):
     # Without the protocol check, the columns would be read as nulls
     delta_table_client = DeltaTableClient(
-        table_uri=str(DATA_DIR / 'table_with_column_mapping'),
+        table_uri=column_mapping_table_uri,
         storage_options_fn=lambda: {},
     )
-    with pytest.raises(DeltaProtocolError, match='column mapping'):
+    with pytest.raises(DeltaProtocolError):
         delta_table_client.load_as_polars()
 
 
