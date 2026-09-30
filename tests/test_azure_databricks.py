@@ -62,7 +62,7 @@ def test_databricks_client_credentials_expired(mocker):
         delta_client,
         '_request',
         side_effect=[
-            _credentials('old-sas', datetime.now()),
+            _credentials('old-sas', datetime.now() + timedelta(minutes=4)),
             _credentials('new-sas', datetime.now() + timedelta(hours=1)),
             AssertionError('Credentials should not be refreshed'),
         ],

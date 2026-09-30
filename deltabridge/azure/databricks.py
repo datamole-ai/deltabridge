@@ -72,10 +72,11 @@ class AzureDatabricksDeltaClient:
     def _get_storage_options(self, table_id: str) -> dict[str, str]:
         """Get the storage options for the Delta table."""
         credentials = self._credentials.get(table_id)
-        # Vend new credentials if missing, expired or close to expiry
+        # Vend new credentials if missing or expiring within 5 minutes, so
+        # that a long scan started now does not outlive them
         if (
             credentials is None
-            or credentials['expiration_time'] / 1000 - 60
+            or credentials['expiration_time'] / 1000 - 300
             <= datetime.now().timestamp()
         ):
             credentials = self._request(
