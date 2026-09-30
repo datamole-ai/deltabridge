@@ -87,8 +87,35 @@ print(table_df)
 If your Delta tables are managed by Databricks (Unity Catalog), they are 
 still stored as ordinary Delta tables in object storage. Deltabridge can read 
 them directly from the storage, so you can access them without a Databricks 
-SQL warehouse or cluster:
-* Use the table's storage location (in Azure Blob Storage) as the table URI.
+SQL warehouse or cluster.
+
+#### Unity Catalog credential vending
+
+`AzureDatabricksDeltaClient` finds the table by its full name and reads it 
+with short-lived credentials vended by Unity Catalog (see 
+[credential vending](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending)).
+The credentials are refreshed automatically before they expire.
+
+```python
+from deltabridge.azure import AzureDatabricksDeltaClient
+
+databricks_client = AzureDatabricksDeltaClient(
+    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
+)
+table_client = databricks_client.get_table_client('catalog.schema.table')
+
+table_df = table_client.load_as_polars().collect()
+```
+
+* The Databricks API is authenticated with the given Azure credential (`DefaultAzureCredential` by default).
+* External data access must be enabled on the metastore.
+* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
+* Tables with row filters or column masks are not supported.
+* Tables with column mapping or catalog-managed commits are not supported yet.
+
+#### Direct storage access
+
+* Use `AzureDeltaClient` with the table's storage location (in Azure Blob Storage) as the table URI.
     * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
 * The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
 
