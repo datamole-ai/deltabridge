@@ -20,11 +20,15 @@ Or, with [uv](https://docs.astral.sh/uv/):
 uv add deltabridge
 ```
 
-## Usage
+## Options
 
-### Examples
+deltabridge can read Delta tables in two ways.
 
-#### Azure
+### 1. Direct storage access
+
+The table is read from its storage location with your own credentials.
+
+#### Example (Azure)
 
 ```python
 import os
@@ -59,7 +63,9 @@ table_df = table_client.load_as_polars(
 ).collect()
 ```
 
-#### Local filesystem
+The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
+
+#### Example (Local)
 
 ```python
 import polars as pl
@@ -83,18 +89,17 @@ table_df = table_client.load_as_polars().collect()
 print(table_df)
 ```
 
-### Databricks tables
-If your Delta tables are managed by Databricks (Unity Catalog), they are 
-still stored as ordinary Delta tables in object storage. Deltabridge can read 
-them directly from the storage, so you can access them without a Databricks 
-SQL warehouse or cluster.
+### 2. Databricks access (Unity Catalog)
 
-#### Unity Catalog credential vending
-
+Databricks tables can also be read with [direct storage access](#1-direct-storage-access), 
+but for tables in Unity Catalog this approach is preferred. 
 `AzureDatabricksDeltaClient` finds the table by its full name and reads it 
-with short-lived credentials vended by Unity Catalog (see 
-[credential vending](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending)).
-The credentials are refreshed automatically before they expire.
+from storage with short-lived credentials vended by Unity Catalog (see 
+[credential vending](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending)), 
+so access follows the catalog's grants and no SQL warehouse or cluster is 
+needed. The credentials are refreshed automatically before they expire.
+
+#### Example (Azure)
 
 ```python
 from deltabridge.azure import AzureDatabricksDeltaClient
@@ -107,17 +112,23 @@ table_client = databricks_client.get_table_client('catalog.schema.table')
 table_df = table_client.load_as_polars().collect()
 ```
 
-* The Databricks API is authenticated with the given Azure credential (`DefaultAzureCredential` by default).
+* The Databricks API is authenticated with the given Azure credential (`DefaultAzureCredential` by default). The identity needs no permission on the storage.
 * External data access must be enabled on the metastore.
 * The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
-* Tables with row filters or column masks are not supported.
-* Tables with column mapping or catalog-managed commits are not supported yet.
 
-#### Direct storage access
+To read a Databricks table with direct storage access instead, use its storage 
+location as the table URI. You can find it in the Databricks Catalog Explorer 
+UI under *Details* of the table. Direct access reads the raw files, so row 
+filters and column masks are not applied.
 
-* Use `AzureDeltaClient` with the table's storage location (in Azure Blob Storage) as the table URI.
-    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
-* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
+#### Limitations
+
+These Databricks tables cannot be read (as of `deltalake` 1.6.6):
+* Views, materialized views and streaming tables (Lakeflow Spark Declarative Pipelines): Unity Catalog has no storage location for them.
+* Shallow clones: Unity Catalog vends no credentials for them, and their files cannot be read directly either.
+* Tables with row filters or column masks: Unity Catalog vends no credentials for them.
+* Tables with deletion vectors, column mapping or catalog-managed commits: the `deltalake` reader does not support them yet, with either option.
+* Tables from a foreign metastore shared via Delta Sharing.
 
 ## Writing to Delta tables
 
