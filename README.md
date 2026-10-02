@@ -22,7 +22,7 @@ uv add deltabridge
 
 ## Usage
 
-### 1. Storage access (own credentials)
+### Storage access (own credentials)
 
 #### Azure
 
@@ -83,9 +83,9 @@ table_df = table_client.load_as_polars().collect()
 print(table_df)
 ```
 
-### 2. Unity Catalog access (vended credentials)
-Recommended for Databricks tables. `AzureDatabricksDeltaClient` reads the 
-table by its full name with short-lived credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
+### Unity Catalog access (vended credentials)
+`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
+credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
 for that table instead of your own storage credentials, so access follows 
 Unity Catalog grants:
 
