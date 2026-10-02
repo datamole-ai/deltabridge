@@ -14,10 +14,7 @@ from deltabridge.client import DeltaTableClient
 
 
 class AzureDatabricksDeltaClient:
-    """Databricks client reads Unity Catalog tables from Azure storage.
-
-    The storage is accessed with short-lived credentials vended by
-    Unity Catalog, so no SQL warehouse or cluster is needed.
+    """Databricks client reads Unity Catalog tables with vended credentials.
 
     Parameters
     ----------
