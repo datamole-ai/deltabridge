@@ -91,13 +91,11 @@ print(table_df)
 
 ### 2. Databricks access (Unity Catalog)
 
-Databricks tables can also be read with [direct storage access](#1-direct-storage-access), 
-but for tables in Unity Catalog this approach is preferred. 
+Preferred for Databricks tables, since access follows Unity Catalog grants. 
 `AzureDatabricksDeltaClient` finds the table by its full name and reads it 
-from storage with short-lived credentials vended by Unity Catalog (see 
-[credential vending](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending)), 
-so access follows the catalog's grants and no SQL warehouse or cluster is 
-needed. The credentials are refreshed automatically before they expire.
+from storage with short-lived credentials 
+[vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending), 
+refreshed automatically, so no SQL warehouse or cluster is needed.
 
 #### Example (Azure)
 
@@ -112,23 +110,21 @@ table_client = databricks_client.get_table_client('catalog.schema.table')
 table_df = table_client.load_as_polars().collect()
 ```
 
-* The Databricks API is authenticated with the given Azure credential (`DefaultAzureCredential` by default). The identity needs no permission on the storage.
 * External data access must be enabled on the metastore.
-* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
+* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema, but no permission on the storage.
+* The Databricks API is authenticated with the given Azure credential (`DefaultAzureCredential` by default).
 
-To read a Databricks table with direct storage access instead, use its storage 
-location as the table URI. You can find it in the Databricks Catalog Explorer 
-UI under *Details* of the table. Direct access reads the raw files, so row 
-filters and column masks are not applied.
+Databricks tables can also be read with [direct storage access](#1-direct-storage-access), 
+using the storage location from the Catalog Explorer (*Details* of the table) 
+as the table URI, but that bypasses row filters and column masks.
 
 #### Limitations
 
-These Databricks tables cannot be read (as of `deltalake` 1.6.6):
-* Views, materialized views and streaming tables (Lakeflow Spark Declarative Pipelines): Unity Catalog has no storage location for them.
-* Shallow clones: Unity Catalog vends no credentials for them, and their files cannot be read directly either.
-* Tables with row filters or column masks: Unity Catalog vends no credentials for them.
-* Tables with deletion vectors, column mapping or catalog-managed commits: the `deltalake` reader does not support them yet, with either option.
-* Tables from a foreign metastore shared via Delta Sharing.
+Unity Catalog vends no credentials for views, materialized views, streaming 
+tables, tables with row filters or column masks, and tables shared via Delta 
+Sharing. Shallow clones and tables with deletion vectors, column mapping or 
+catalog-managed commits cannot be read with either option (as of `deltalake` 
+1.6.6).
 
 ## Writing to Delta tables
 
