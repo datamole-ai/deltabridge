@@ -36,8 +36,7 @@ class AzureDatabricksDeltaClient:
             per_retry_policies=[
                 BearerTokenCredentialPolicy(
                     credential or DefaultAzureCredential(),
-                    # Application ID of Azure Databricks, the same for all
-                    # workspaces
+                    # Application ID of Azure Databricks
                     '2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default',
                 )
             ],
