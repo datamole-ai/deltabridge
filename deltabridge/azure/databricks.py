@@ -41,6 +41,7 @@ class AzureDatabricksDeltaClient:
                 )
             ],
         )
+        # Vended credentials per table ID, as they only cover one table
         self._credentials: dict[str, dict[str, Any]] = {}
 
     def get_table_client(self, table_name: str) -> DeltaTableClient:
