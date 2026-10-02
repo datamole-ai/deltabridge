@@ -12,9 +12,6 @@ from azure.identity import ChainedTokenCredential, DefaultAzureCredential
 
 from deltabridge.client import DeltaTableClient
 
-# Application ID of Azure Databricks, the same for all workspaces
-_DATABRICKS_SCOPE = '2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default'
-
 
 class AzureDatabricksDeltaClient:
     """Databricks client reads Unity Catalog tables from Azure storage.
@@ -41,7 +38,10 @@ class AzureDatabricksDeltaClient:
             base_url=workspace_url,
             per_retry_policies=[
                 BearerTokenCredentialPolicy(
-                    credential or DefaultAzureCredential(), _DATABRICKS_SCOPE
+                    credential or DefaultAzureCredential(),
+                    # Application ID of Azure Databricks, the same for all
+                    # workspaces
+                    '2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default',
                 )
             ],
         )
@@ -69,22 +69,29 @@ class AzureDatabricksDeltaClient:
             ),
         )
 
-    def _get_storage_options(self, table_id: str) -> dict[str, str]:
-        """Get the storage options for the Delta table."""
+    def _get_credentials(self, table_id: str) -> dict[str, Any]:
+        return self._request(
+            'POST',
+            'temporary-table-credentials',
+            json={'table_id': table_id, 'operation': 'READ'},
+        )
+
+    def _refresh_credentials(self, table_id: str) -> None:
+        """Refresh the credentials if they are expired or close to expiry."""
         credentials = self._credentials.get(table_id)
-        # Vend new credentials if missing or expiring within 5 minutes, so
-        # that a long scan started now does not outlive them
+        # 5 minutes before expiry, so that a long scan started now does not
+        # outlive the credentials
         if (
             credentials is None
             or credentials['expiration_time'] / 1000 - 300
             <= datetime.now().timestamp()
         ):
-            credentials = self._request(
-                'POST',
-                'temporary-table-credentials',
-                json={'table_id': table_id, 'operation': 'READ'},
-            )
-            self._credentials[table_id] = credentials
+            self._credentials[table_id] = self._get_credentials(table_id)
+
+    def _get_storage_options(self, table_id: str) -> dict[str, str]:
+        """Get the storage options for the Delta table."""
+        self._refresh_credentials(table_id)
+        credentials = self._credentials[table_id]
         sas_token = credentials['azure_user_delegation_sas']['sas_token']
         return {'azure_storage_sas_key': sas_token}
 

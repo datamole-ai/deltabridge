@@ -1,25 +1,23 @@
 from datetime import datetime, timedelta
 from unittest.mock import Mock
 
+import pytest
 from azure.core.credentials import TokenCredential
 
 from deltabridge.azure import AzureDatabricksDeltaClient
 
 
-def _credentials(sas_token: str, expires_on: datetime) -> dict:
-    return {
-        'azure_user_delegation_sas': {'sas_token': sas_token},
-        'expiration_time': int(expires_on.timestamp() * 1000),
-    }
-
-
-def test_databricks_client_get_table_client(mocker):
-    delta_table_client = mocker.patch(
-        'deltabridge.azure.databricks.DeltaTableClient'
-    )
-    delta_client = AzureDatabricksDeltaClient(
+@pytest.fixture
+def delta_client():
+    return AzureDatabricksDeltaClient(
         workspace_url='https://adb-123.azuredatabricks.net',
         credential=Mock(spec=TokenCredential),
+    )
+
+
+def test_databricks_client_get_table_client(delta_client, mocker):
+    delta_table_client = mocker.patch(
+        'deltabridge.azure.databricks.DeltaTableClient'
     )
     request = mocker.patch.object(
         delta_client,
@@ -33,16 +31,17 @@ def test_databricks_client_get_table_client(mocker):
     assert delta_table_client.call_args.kwargs['table_uri'] == 'abfss://t'
 
 
-def test_databricks_client_credentials_not_expired(mocker):
-    delta_client = AzureDatabricksDeltaClient(
-        workspace_url='https://adb-123.azuredatabricks.net',
-        credential=Mock(spec=TokenCredential),
-    )
+def test_databricks_client_credentials_not_expired(delta_client, mocker):
     mocker.patch.object(
         delta_client,
         '_request',
         side_effect=[
-            _credentials('test-sas', datetime.now() + timedelta(hours=1)),
+            {
+                'azure_user_delegation_sas': {'sas_token': 'test-sas'},
+                'expiration_time': int(
+                    (datetime.now() + timedelta(hours=1)).timestamp() * 1000
+                ),
+            },
             AssertionError('Credentials should not be refreshed'),
         ],
     )
@@ -53,17 +52,23 @@ def test_databricks_client_credentials_not_expired(mocker):
         }, 'Credentials should not be refreshed'
 
 
-def test_databricks_client_credentials_expired(mocker):
-    delta_client = AzureDatabricksDeltaClient(
-        workspace_url='https://adb-123.azuredatabricks.net',
-        credential=Mock(spec=TokenCredential),
-    )
+def test_databricks_client_credentials_expired(delta_client, mocker):
     request = mocker.patch.object(
         delta_client,
         '_request',
         side_effect=[
-            _credentials('old-sas', datetime.now() + timedelta(minutes=4)),
-            _credentials('new-sas', datetime.now() + timedelta(hours=1)),
+            {
+                'azure_user_delegation_sas': {'sas_token': 'old-sas'},
+                'expiration_time': int(
+                    (datetime.now() + timedelta(minutes=4)).timestamp() * 1000
+                ),
+            },
+            {
+                'azure_user_delegation_sas': {'sas_token': 'new-sas'},
+                'expiration_time': int(
+                    (datetime.now() + timedelta(hours=1)).timestamp() * 1000
+                ),
+            },
             AssertionError('Credentials should not be refreshed'),
         ],
     )
