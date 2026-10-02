@@ -84,10 +84,9 @@ print(table_df)
 ```
 
 ### 2. Databricks access (Unity Catalog)
-Recommended for Databricks tables, as access follows Unity Catalog grants. 
-`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
-credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending), 
-so you can access it without a Databricks SQL warehouse or cluster:
+Recommended for Databricks tables. `AzureDatabricksDeltaClient` reads the 
+table by its full name with short-lived credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
+instead of your own storage credentials, so access follows Unity Catalog grants:
 
 ```python
 from deltabridge.azure import AzureDatabricksDeltaClient
