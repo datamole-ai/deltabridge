@@ -22,7 +22,7 @@ uv add deltabridge
 
 ## Usage
 
-### 1. Direct storage access
+### 1. Storage access (own credentials)
 
 #### Azure
 
@@ -83,7 +83,7 @@ table_df = table_client.load_as_polars().collect()
 print(table_df)
 ```
 
-### 2. Databricks access (Unity Catalog)
+### 2. Unity Catalog access (vended credentials)
 Recommended for Databricks tables. `AzureDatabricksDeltaClient` reads the 
 table by its full name with short-lived credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
 for that table instead of your own storage credentials, so access follows 
@@ -104,7 +104,7 @@ table_df = table_client.load_as_polars().collect()
 * The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
 * Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters, column masks, deletion vectors, column mapping or catalog-managed commits.
 
-Databricks tables can also be read with direct storage access:
+Databricks tables can also be read with storage access:
 * Use the table's storage location (in Azure Blob Storage) as the table URI.
     * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
 * The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
