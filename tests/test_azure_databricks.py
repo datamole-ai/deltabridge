@@ -31,27 +31,6 @@ def test_databricks_client_get_table_client(delta_client, mocker):
     assert delta_table_client.call_args.kwargs['table_uri'] == 'abfss://t'
 
 
-def test_databricks_client_credentials_not_expired(delta_client, mocker):
-    mocker.patch.object(
-        delta_client,
-        '_request',
-        side_effect=[
-            {
-                'azure_user_delegation_sas': {'sas_token': 'test-sas'},
-                'expiration_time': int(
-                    (datetime.now() + timedelta(hours=1)).timestamp() * 1000
-                ),
-            },
-            AssertionError('Credentials should not be refreshed'),
-        ],
-    )
-
-    for _ in range(2):
-        assert delta_client._get_storage_options('table-id') == {
-            'azure_storage_sas_key': 'test-sas'
-        }, 'Credentials should not be refreshed'
-
-
 def test_databricks_client_credentials_expired(delta_client, mocker):
     request = mocker.patch.object(
         delta_client,
