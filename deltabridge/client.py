@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import polars as pl
 from deltalake import DeltaTable
+from deltalake.exceptions import DeltaProtocolError
 
 
 class PartitionFilterOperator(StrEnum):
@@ -105,8 +106,18 @@ class DeltaTableClient:
         ------
         ValueError
             If an invalid partition filter operator is provided.
+        deltalake.exceptions.DeltaProtocolError
+            If the table uses column mapping.
         """
         table = self.load_as_delta()
+
+        # deltalake>=1.6.4 no longer rejects reader version 2 (column mapping)
+        # and reads the columns as nulls (delta-io/delta-rs#4712)
+        if table.protocol().min_reader_version == 2:
+            raise DeltaProtocolError(
+                'The table uses column mapping (reader version 2), '
+                'which cannot be read.'
+            )
 
         # Check if the table is partitioned
         if partition_filter:
