@@ -25,6 +25,33 @@ Create unit tests by creating a Python script in the folder `tests` prefixed wit
 The script should contain functions also prefixed with `test_` that make assertions.
 See the `tests` folder for reference.
 
+### Dependency audit
+CI runs `uv audit --locked` to find known vulnerabilities in the locked dependencies.
+Run the same command locally:
+```bash
+uv audit --locked
+```
+
+If the audit reports a vulnerability, read the advisory.
+Update the affected package and run the audit again:
+```bash
+uv lock --upgrade-package PACKAGE
+uv audit --locked
+```
+If a version constraint blocks the update, change it in `pyproject.toml`.
+Run `uv lock` again.
+
+If you cannot apply a fix, record the reason in the pull request.
+Link a follow-up issue in the same pull request.
+Add the advisory ID to the audit command in `.github/workflows/test.yaml`:
+```bash
+uv audit --locked --ignore GHSA-xxxx-xxxx-xxxx
+```
+Use `--ignore`, not `--ignore-vulnerability`; the pinned uv version does not support the latter.
+Remove the exception when you can apply the fix.
+If no fixed version exists, use `--ignore-until-fixed GHSA-xxxx-xxxx-xxxx` instead.
+That exception stops working when a fixed version becomes available.
+
 ## Pull Requests & Git
 
 * Split your work into separate and atomic pull requests. Put any
