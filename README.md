@@ -36,6 +36,7 @@ from deltabridge import PartitionFilterOperator
 from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
+# Reuse this client across reads; each load refreshes the table as needed.
 table_client = azure_delta_client.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
