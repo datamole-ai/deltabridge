@@ -70,9 +70,7 @@ from deltabridge.local import LocalDeltaClient
 MY_TABLE_PATH = '/tmp/my_table'
 
 # Write a table to a local filesystem
-pl.DataFrame({'x': [1, 2, 3]}).write_delta(
-    target=MY_TABLE_PATH
-)
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
 
 local_delta_client = LocalDeltaClient()
 table_client = local_delta_client.get_table_client(
