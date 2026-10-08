@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from threading import Lock
 from typing import Any, Callable
 
 import polars as pl
@@ -45,6 +46,7 @@ class DeltaTableClient:
     ):
         self._table_uri = table_uri
         self._storage_options_fn = storage_options_fn
+        self._refresh_lock = Lock()
         self._storage_options = self._storage_options_fn()
         self._delta_table = self._create_delta_table(self._storage_options)
 
@@ -99,25 +101,23 @@ class DeltaTableClient:
         polars.LazyFrame
             A Polars LazyFrame representing the scanned Delta table.
             If partition filtering is applied, only matching rows
-            are included.
+            are included. Its schema and file list are captured before this
+            method returns, so subsequent client refreshes do not change it.
 
         Raises
         ------
         ValueError
             If an invalid partition filter operator is provided.
         """
-        table = self.load_as_delta()
-
-        # Check if the table is partitioned
         if partition_filter:
             for _, operator, _ in partition_filter:
                 # Raises ValueError if invalid
                 PartitionFilterOperator(operator)
-            pyarrow_options = {'partitions': partition_filter}
-        else:
-            # No partition filter for non-partitioned tables
-            pyarrow_options = {}
 
-        return pl.scan_delta(
-            source=table, use_pyarrow=True, pyarrow_options=pyarrow_options
-        )
+        with self._refresh_lock:
+            self._refresh_table()
+            dataset = self._delta_table.to_pyarrow_dataset(
+                partitions=partition_filter
+            )
+
+        return pl.scan_pyarrow_dataset(dataset)
