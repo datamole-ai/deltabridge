@@ -5,6 +5,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 from deltalake import DeltaTable
+from deltalake.exceptions import DeltaProtocolError
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
@@ -33,6 +34,18 @@ def sample_df():
 def temp_delta_table_uri(sample_df):
     with tempfile.TemporaryDirectory() as tmpdir:
         write_deltalake(tmpdir, sample_df, partition_by=['id', 'value'])
+        yield tmpdir
+
+
+@pytest.fixture
+def column_mapping_table_uri(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_deltalake(
+            tmpdir,
+            # deltalake ignores column mapping for tables with timestamp_ntz
+            sample_df.drop('datetime'),
+            configuration={'delta.columnMapping.mode': 'name'},
+        )
         yield tmpdir
 
 
@@ -126,6 +139,16 @@ def test_load_invalid_partition_filter(temp_delta_table_uri):
         delta_table_client.load_as_polars(
             partition_filter=[('id', 'invalid', '2')],
         )
+
+
+def test_load_as_polars_with_column_mapping(column_mapping_table_uri):
+    # Without the protocol check, the columns would be read as nulls
+    delta_table_client = DeltaTableClient(
+        table_uri=column_mapping_table_uri,
+        storage_options_fn=lambda: {},
+    )
+    with pytest.raises(DeltaProtocolError):
+        delta_table_client.load_as_polars()
 
 
 def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):
