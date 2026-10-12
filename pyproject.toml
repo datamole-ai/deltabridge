@@ -51,9 +51,9 @@ Repository = "https://github.com/datamole-ai/deltabridge"
 
 [dependency-groups]
 dev = [
-    "pytest~=8.4",
+    "pytest~=9.0",
     "pytest-mock~=3.8",
-    "ruff~=0.11",
+    "ruff~=0.16",
 ]
 
 [tool.ruff]
@@ -63,6 +63,7 @@ lint.select = [
     "E",
     "F",
     "N",
+    "S",
     "W",
     "I001",
 ]
@@ -73,6 +74,7 @@ quote-style = "single"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402", "F401"]
 "*/**" = ["E402"]
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["deltabridge"]
