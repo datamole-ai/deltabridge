@@ -36,6 +36,7 @@ from deltabridge import PartitionFilterOperator
 from deltabridge.azure import AzureDeltaClient
 
 azure_delta_client = AzureDeltaClient()
+# Reuse this client across reads; each load refreshes the table as needed.
 table_client = azure_delta_client.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
@@ -69,9 +70,7 @@ from deltabridge.local import LocalDeltaClient
 MY_TABLE_PATH = '/tmp/my_table'
 
 # Write a table to a local filesystem
-pl.DataFrame({'x': [1, 2, 3]}).write_delta(
-    target=MY_TABLE_PATH
-)
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
 
 local_delta_client = LocalDeltaClient()
 table_client = local_delta_client.get_table_client(
