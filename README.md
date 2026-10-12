@@ -22,6 +22,12 @@ uv add deltabridge
 
 ## Usage
 
+### Concurrency and thread safety
+
+Both methods refresh metadata before returning. `load_as_polars()` returns a
+LazyFrame with a fixed schema and file list. `load_as_delta()` returns the shared
+cached DeltaTable, which later loads can change.
+
 ### Examples
 
 #### Azure

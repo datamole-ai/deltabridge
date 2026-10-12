@@ -53,6 +53,36 @@ def test_load_as_delta(temp_delta_table_uri):
     )
 
 
+def test_load_as_delta_and_polars_after_append(
+    temp_delta_table_uri, sample_df
+):
+    appended = sample_df.with_columns(pl.col('id') + 10)
+    client = DeltaTableClient(temp_delta_table_uri, lambda: {})
+
+    delta_table = client.load_as_delta()
+    polars_table = client.load_as_polars()
+    assert_frame_equal(
+        pl.read_delta(delta_table).sort('id', 'value'),
+        sample_df.sort('id', 'value'),
+    )
+    assert_frame_equal(
+        polars_table.sort('id', 'value').collect(),
+        sample_df.sort('id', 'value'),
+    )
+    assert client.load_as_delta() is delta_table
+
+    write_deltalake(temp_delta_table_uri, appended, mode='append')
+    assert client.load_as_delta() is delta_table
+    assert_frame_equal(
+        pl.read_delta(delta_table).sort('id', 'value'),
+        pl.concat([sample_df, appended]).sort('id', 'value'),
+    )
+    assert_frame_equal(
+        polars_table.sort('id', 'value').collect(),
+        sample_df.sort('id', 'value'),
+    )
+
+
 def test_load_as_polars(temp_delta_table_uri, sample_df):
     delta_table_client = DeltaTableClient(
         table_uri=temp_delta_table_uri,
@@ -62,6 +92,29 @@ def test_load_as_polars(temp_delta_table_uri, sample_df):
         # Sort both frames to ensure the order is the same
         delta_table_client.load_as_polars().sort('id', 'value').collect(),
         sample_df,
+    )
+
+
+def test_cached_delta_refresh_preserves_polars_snapshot(
+    temp_delta_table_uri, sample_df
+):
+    replacement = sample_df.with_columns(
+        pl.col('id') + 10, pl.col('datetime').cast(pl.String)
+    )
+    client = DeltaTableClient(temp_delta_table_uri, lambda: {})
+    pending_read = client.load_as_polars()
+
+    write_deltalake(
+        temp_delta_table_uri,
+        replacement,
+        mode='overwrite',
+        schema_mode='overwrite',
+    )
+    client.load_as_polars()
+
+    assert_frame_equal(pending_read.sort('id', 'value').collect(), sample_df)
+    assert_frame_equal(
+        client.load_as_polars().sort('id', 'value').collect(), replacement
     )
 
 
