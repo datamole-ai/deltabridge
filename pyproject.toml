@@ -9,7 +9,7 @@ authors = [
     {name = "Michal Belak", email = "michal.belak@datamole.ai"},
     {name = "Jan Lukany", email = "jan.lukany@datamole.ai"}
 ]
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.15,<3.16"
 dependencies = [
     "azure-identity>=1.17.1",
     # Explicit floor (also pulled in by polars[deltalake], unpinned):
