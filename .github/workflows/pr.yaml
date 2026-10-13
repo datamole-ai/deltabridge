@@ -10,9 +10,9 @@ env:
 
 jobs:
   pr-title-check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install convco
         run: |
           curl -sSfL "https://github.com/convco/convco/releases/download/${{ env.CONVCO_VERSION }}/convco-ubuntu.zip" | zcat > /usr/local/bin/convco
@@ -21,7 +21,7 @@ jobs:
         run: echo "${{ github.event.pull_request.title }}" | convco check --from-stdin
 
   dismiss-stale-pr-reviews:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.event.action == 'edited'
     permissions:
       pull-requests: write
