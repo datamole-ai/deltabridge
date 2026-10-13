@@ -118,6 +118,8 @@ Databricks tables can also be read with storage access:
 | [Deletion vectors](https://learn.microsoft.com/en-us/azure/databricks/tables/features/deletion-vectors) | ❌ | ✅ | ❌ |
 | [Column mapping](https://learn.microsoft.com/en-us/azure/databricks/tables/features/column-mapping) | ❌ | ✅ | ❌² |
 | [Checkpoint V2](https://learn.microsoft.com/en-us/azure/databricks/tables/features/checkpoint-v2) | ❌ | ✅ | ❌ |
+| [`TIMESTAMP_NTZ`](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/data-types/timestamp-ntz-type) | ✅ | ✅ | ✅ |
+| [Type widening](https://learn.microsoft.com/en-us/azure/databricks/tables/features/type-widening) | ❌ | ❌ | ❌ |
 | [Catalog commits](https://learn.microsoft.com/en-us/azure/databricks/tables/features/catalog-commits) | ❌ | ❌ | ❌ |
 
 ¹ Also `to_pyarrow_table()` and `to_pandas()`, which wrap it.  
