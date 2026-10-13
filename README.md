@@ -101,13 +101,44 @@ table_df = table_client.load_as_polars().collect()
 
 * External data access must be enabled on the metastore.
 * The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
-* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters, column masks, deletion vectors, column mapping or catalog-managed commits.
+* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
 
 Databricks tables can also be read with storage access:
 * Use the table's storage location (in Azure Blob Storage) as the table URI.
     * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
 * The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
 * Row filters and column masks are not applied.
+
+## Supported Delta features
+
+### Features that change the read protocol
+
+| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ |
+| --- | --- | --- | --- |
+| [Deletion vectors](https://learn.microsoft.com/en-us/azure/databricks/tables/features/deletion-vectors) | ❌ | ✅ | ❌ |
+| [Column mapping](https://learn.microsoft.com/en-us/azure/databricks/tables/features/column-mapping) | ❌ | ✅ | ❌² |
+| [Checkpoint V2](https://learn.microsoft.com/en-us/azure/databricks/tables/features/checkpoint-v2) | ❌ | ✅ | ❌ |
+| [`TIMESTAMP_NTZ`](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/data-types/timestamp-ntz-type) | ✅ | ✅ | ✅ |
+| [Type widening](https://learn.microsoft.com/en-us/azure/databricks/tables/features/type-widening) | ❌ | ❌ | ❌ |
+| [Catalog commits](https://learn.microsoft.com/en-us/azure/databricks/tables/features/catalog-commits) | ❌ | ❌ | ❌ |
+
+¹ Also `to_pyarrow_table()` and `to_pandas()`, which wrap it.  
+² Reads the columns as nulls instead of failing on tables with reader version 2.
+
+### Features that don't change the read protocol
+
+| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ |
+| --- | --- | --- | --- |
+| [Liquid clustering](https://learn.microsoft.com/en-us/azure/databricks/tables/clustering) | ✅³ | ✅ | ✅³ |
+| [Z-ordering](https://learn.microsoft.com/en-us/azure/databricks/tables/data-skipping#what-is-z-ordering) | ✅ | ✅ | ✅ |
+
+³ Databricks turns on Checkpoint V2 for new liquid clustering tables. Create them with `'delta.checkpointPolicy' = 'classic'` to read them here.
+
+### What each reader returns
+
+| | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()` |
+| --- | --- | --- | --- |
+| Returns | lazy [`pl.LazyFrame`](https://docs.pola.rs/api/python/stable/reference/lazyframe/index.html) | one-shot Arrow `RecordBatchReader` | lazy `pyarrow.dataset.Dataset` |
 
 ## Writing to Delta tables
 
