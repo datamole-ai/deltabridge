@@ -22,24 +22,77 @@ uv add deltabridge
 
 ## Usage
 
-### Storage access (own credentials)
+### Access
+A client gives a table client for each table, which [batch reads](#batch-reads) 
+and [streaming reads](#streaming-reads) use. Reuse the table client across 
+reads; each load refreshes the table as needed.
 
-#### Azure
+#### Storage access (own credentials)
+
+##### Azure
 
 ```python
 import os
 
+from deltabridge.azure import AzureDeltaClient
+
+azure_delta_client = AzureDeltaClient()
+table_client = azure_delta_client.get_table_client(
+    table_uri=os.environ['MY_TABLE_STORAGE_URI'],
+)
+```
+
+##### Local filesystem
+
+```python
+import polars as pl
+
+from deltabridge.local import LocalDeltaClient
+
+MY_TABLE_PATH = '/tmp/my_table'
+
+# Write a table to a local filesystem
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
+
+local_delta_client = LocalDeltaClient()
+table_client = local_delta_client.get_table_client(
+    table_uri=MY_TABLE_PATH  # File path can be used as table URI
+)
+```
+
+#### Unity Catalog access (vended credentials)
+`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
+credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
+for that table instead of your own storage credentials, so access follows 
+Unity Catalog grants:
+
+```python
+from deltabridge.azure import AzureDatabricksDeltaClient
+
+databricks_client = AzureDatabricksDeltaClient(
+    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
+)
+table_client = databricks_client.get_table_client('catalog.schema.table')
+```
+
+* External data access must be enabled on the metastore.
+* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
+* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
+
+Databricks tables can also be read with storage access:
+* Use the table's storage location (in Azure Blob Storage) as the table URI.
+    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
+* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
+* Row filters and column masks are not applied.
+
+### Batch reads
+`load_as_delta()` and `load_as_polars()` read the latest version of the table:
+
+```python
 import deltalake
 import polars as pl
 
 from deltabridge import PartitionFilterOperator
-from deltabridge.azure import AzureDeltaClient
-
-azure_delta_client = AzureDeltaClient()
-# Reuse this client across reads; each load refreshes the table as needed.
-table_client = azure_delta_client.get_table_client(
-    table_uri=os.environ['MY_TABLE_STORAGE_URI'],
-)
 
 # Get a DeltaTable instance
 delta_table: deltalake.DeltaTable = table_client.load_as_delta()
@@ -60,56 +113,32 @@ table_df = table_client.load_as_polars(
 ).collect()
 ```
 
-#### Local filesystem
+### Streaming reads
+`load_as_stream()` reads the rows added by new table versions, like a Spark 
+structured streaming read of a Delta table. A checkpoint stores the last read 
+version, the offset of the stream. `LocalDeltaClient.get_checkpoint()` stores 
+it in a local file:
 
 ```python
-import polars as pl
+checkpoint = local_delta_client.get_checkpoint('/tmp/my_checkpoint.json')
+stream = table_client.load_as_stream(checkpoint, max_versions=100)
 
-from deltabridge.local import LocalDeltaClient
-
-MY_TABLE_PATH = '/tmp/my_table'
-
-# Write a table to a local filesystem
-pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
-
-local_delta_client = LocalDeltaClient()
-table_client = local_delta_client.get_table_client(
-    table_uri=MY_TABLE_PATH  # File path can be used as table URI
-)
-
-# Load the data as a Polars LazyFrame and collect it into a DataFrame
-table_df = table_client.load_as_polars().collect()
-print(table_df)
+# Calls print with each batch of added rows until an exception
+stream.for_each_batch(print)
 ```
 
-### Unity Catalog access (vended credentials)
-`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
-credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
-for that table instead of your own storage credentials, so access follows 
-Unity Catalog grants:
-
-```python
-from deltabridge.azure import AzureDatabricksDeltaClient
-
-databricks_client = AzureDatabricksDeltaClient(
-    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
-)
-table_client = databricks_client.get_table_client('catalog.schema.table')
-
-table_df = table_client.load_as_polars().collect()
-```
-
-* External data access must be enabled on the metastore.
-* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
-* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
-
-Databricks tables can also be read with storage access:
-* Use the table's storage location (in Azure Blob Storage) as the table URI.
-    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
-* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
-* Row filters and column masks are not applied.
+* `for_each_batch()` waits `interval` seconds (30 by default) when there are no new versions. To stop it, e.g. on SIGTERM, pass a `threading.Event` as `stop` and set it.
+* Delivery is at-least-once: the offset is saved after the function returns.
+* Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
+* Versions which only rearrange data, e.g. OPTIMIZE, are skipped. A version which deletes or updates rows raises `ValueError`.
+* A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
+* The change data feed is not needed: the stream reads the files added by each version from the Delta log.
+* Not supported yet: partitioned tables, and struct columns of tables with column mapping.
+* Only one process may use a checkpoint. For other storage, subclass `BaseCheckpoint`.
 
 ## Supported Delta features
+
+For `load_as_stream()`, see the limitations in [Streaming reads](#streaming-reads).
 
 ### Features that change the read protocol
 
