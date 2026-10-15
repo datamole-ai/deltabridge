@@ -47,22 +47,27 @@ def read_ids(stream):
     return sorted(id_ for df in next_batch(stream) for id_ in df['id'])
 
 
-def test_start_earliest(table_uri):
-    write(table_uri, [1, 2])
-    write(table_uri, [3])
-    stream = load_stream(table_uri)
-
-    assert read_ids(stream) == [1, 2, 3]
-    assert next_batch(stream) == []
-
-
-def test_start_latest(table_uri):
-    write(table_uri, [1, 2])
+@pytest.fixture
+def stream(table_uri):
+    write(table_uri, [1])
     stream = load_stream(table_uri, StartingOffset.LATEST)
-
     assert next_batch(stream) == []
-    write(table_uri, [3, 4])
-    assert read_ids(stream) == [3, 4]
+    return stream
+
+
+@pytest.mark.parametrize(
+    ('start', 'expected'),
+    [(StartingOffset.EARLIEST, [1, 2]), (StartingOffset.LATEST, [])],
+)
+def test_start(table_uri, start, expected):
+    write(table_uri, [1])
+    write(table_uri, [2])
+    stream = load_stream(table_uri, start)
+
+    assert read_ids(stream) == expected
+    write(table_uri, [3])
+    assert read_ids(stream) == [3]
+    assert next_batch(stream) == []
 
 
 def test_max_versions(table_uri):
@@ -75,31 +80,6 @@ def test_max_versions(table_uri):
     assert read_ids(stream) == [2, 3, 4]
     assert read_ids(stream) == [5]
     assert next_batch(stream) == []
-
-
-def test_offset_saved_after_func(table_uri):
-    write(table_uri, [1])
-    assert next_batch(load_stream(table_uri, StartingOffset.LATEST)) == []
-    write(table_uri, [2, 3])
-
-    def fail(df):
-        raise RuntimeError('export failed')
-
-    with pytest.raises(RuntimeError):
-        load_stream(table_uri).process_batch(fail)
-    # The batch is read again, as its offset is not saved
-    assert read_ids(load_stream(table_uri)) == [2, 3]
-    assert next_batch(load_stream(table_uri)) == []
-
-
-def test_other_table_id(table_uri):
-    write(table_uri, [1])
-    LocalCheckpoint(f'{table_uri}.json').save(
-        StreamOffset('other-table-id', 0)
-    )
-
-    with pytest.raises(ValueError, match='another table'):
-        next_batch(load_stream(table_uri))
 
 
 def test_delete_fails(table_uri):
@@ -116,13 +96,15 @@ def test_delete_fails(table_uri):
             next_batch(stream)
 
 
-def test_optimize_skipped(table_uri):
-    write(table_uri, [1])
+@pytest.mark.parametrize('pending', [False, True])
+def test_optimize(table_uri, stream, pending):
     write(table_uri, [2])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    assert next_batch(stream) == []
+    if not pending:
+        assert read_ids(stream) == [2]
     DeltaTable(table_uri).optimize.compact()
 
+    assert read_ids(stream) == ([2] if pending else [])
+    assert stream._checkpoint.load().version == 2
     assert next_batch(stream) == []
     write(table_uri, [3])
     assert read_ids(stream) == [3]
@@ -143,10 +125,8 @@ def test_process_batch(table_uri):
     assert not stream.process_batch(batches.append)
 
 
-def test_callback_failure_retries_same_stream(table_uri):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+@pytest.mark.parametrize('restart', [False, True])
+def test_callback_failure(table_uri, stream, restart):
     write(table_uri, [2])
 
     def fail(df):
@@ -155,13 +135,13 @@ def test_callback_failure_retries_same_stream(table_uri):
     with pytest.raises(RuntimeError, match='export failed'):
         stream.process_batch(fail)
     assert stream._checkpoint.load().version == 0
+    if restart:
+        stream = load_stream(table_uri)
     assert read_ids(stream) == [2]
+    assert next_batch(stream) == []
 
 
-def test_checkpoint_failure_retries_same_stream(table_uri, mocker):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+def test_checkpoint_failure_retries_same_stream(table_uri, stream, mocker):
     write(table_uri, [2])
     save = stream._checkpoint.save
     mocked_save = mocker.patch.object(
@@ -178,10 +158,7 @@ def test_checkpoint_failure_retries_same_stream(table_uri, mocker):
 
 
 @pytest.mark.parametrize('missing', ['data', 'log'])
-def test_read_failure_retries_same_stream(table_uri, missing):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+def test_read_failure_retries_same_stream(table_uri, stream, missing):
     write(table_uri, [2])
     log = Path(table_uri) / '_delta_log' / '00000000000000000001.json'
     if missing == 'data':
@@ -209,13 +186,20 @@ def test_invalid_max_versions(table_uri, max_versions):
         load_stream(table_uri, max_versions=max_versions)
 
 
-@pytest.mark.parametrize('version', [-1, 2])
-def test_invalid_offset_version(table_uri, version):
-    write(table_uri, [1])
-    LocalCheckpoint(f'{table_uri}.json').save(
-        StreamOffset(DeltaTable(table_uri).metadata().id, version)
+@pytest.mark.parametrize(
+    ('table_id', 'version', 'error'),
+    [
+        ('other-table-id', 0, 'another table'),
+        (None, -1, 'out of range'),
+        (None, 2, 'out of range'),
+    ],
+)
+def test_invalid_checkpoint(table_uri, stream, table_id, version, error):
+    checkpoint = stream._checkpoint
+    checkpoint.save(
+        StreamOffset(table_id or checkpoint.load().table_id, version)
     )
-    with pytest.raises(ValueError, match='out of range'):
+    with pytest.raises(ValueError, match=error):
         next_batch(load_stream(table_uri))
 
 
@@ -253,10 +237,7 @@ def test_schema_change_beyond_batch_limit(table_uri, restart):
     assert stream._checkpoint.load().version == 0
 
 
-def test_metadata_change(table_uri):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+def test_metadata_change(table_uri, stream):
     DeltaTable(table_uri).alter.set_table_properties(
         {'delta.appendOnly': 'true'}
     )
@@ -264,23 +245,8 @@ def test_metadata_change(table_uri):
         next_batch(stream)
 
 
-def test_append_then_optimize(table_uri):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
-    write(table_uri, [2])
-    write(table_uri, [3])
-    DeltaTable(table_uri).optimize.compact()
-    assert read_ids(stream) == [2, 3]
-    assert stream._checkpoint.load().version == 3
-    assert next_batch(stream) == []
-
-
 @pytest.mark.parametrize('absolute', [False, True])
-def test_encoded_file_paths(table_uri, absolute):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+def test_encoded_file_paths(table_uri, stream, absolute):
     write(table_uri, [2])
     log = Path(table_uri) / '_delta_log' / '00000000000000000001.json'
     actions = [json.loads(line) for line in log.read_text().splitlines()]
@@ -309,10 +275,7 @@ def test_unsupported_table(table_uri, options):
         next_batch(load_stream(table_uri))
 
 
-def test_idle_poll_skips_commit_and_data_reads(table_uri, mocker):
-    write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
-    next_batch(stream)
+def test_idle_poll_skips_commit_and_data_reads(stream, mocker):
     read_versions = mocker.spy(stream, '_read_versions')
     scan = mocker.spy(pl, 'scan_parquet')
     assert not stream.process_batch(lambda df: pytest.fail('Unexpected batch'))
