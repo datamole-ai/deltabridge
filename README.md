@@ -10,12 +10,13 @@ via a REST API, where request latency should stay predictable.
  > and automatic incremental caching of Delta transaction logs.
 
 ## Installation
-Install the extra for your object storage provider. The local filesystem 
-needs no extra.
+Install the extra for your object storage provider, or both. The local 
+filesystem needs no extra.
 
 ```bash
-pip install 'deltabridge[azure]'  # Azure Blob Storage
-pip install 'deltabridge[aws]'    # AWS S3
+pip install 'deltabridge[azure]'      # Azure Blob Storage
+pip install 'deltabridge[aws]'        # AWS S3
+pip install 'deltabridge[azure,aws]'  # both
 ```
 
 Or, with [uv](https://docs.astral.sh/uv/):
@@ -26,24 +27,98 @@ uv add 'deltabridge[azure]'
 
 ## Usage
 
-### Storage access (own credentials)
+### Access
+A client gives a table client for each table, which [batch reads](#batch-reads) 
+use. Reuse the table client across reads; each load refreshes the table as 
+needed.
 
-#### Azure
+#### Storage access (own credentials)
+Object storage support currently covers Azure Blob Storage and AWS S3, plus 
+the local filesystem. The table is read with your own credentials.
+
+##### Azure
 
 ```python
 import os
 
+from deltabridge.azure import AzureDeltaClient
+
+azure_delta_client = AzureDeltaClient()
+table_client = azure_delta_client.get_table_client(
+    table_uri=os.environ['MY_TABLE_STORAGE_URI'],
+)
+```
+
+##### AWS
+
+```python
+import os
+
+from deltabridge.aws import AwsDeltaClient
+
+# Credentials and region come from the default boto3 session (environment
+# variables, shared config and credentials files, instance role, ...).
+# Pass your own boto3.Session to use a specific profile or assumed role.
+aws_delta_client = AwsDeltaClient()
+table_client = aws_delta_client.get_table_client(
+    table_uri=os.environ['MY_TABLE_STORAGE_URI'],  # e.g. s3://bucket/path
+)
+```
+
+* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire.
+* The region of the session must be the region of the bucket.
+
+##### Local filesystem
+
+```python
+import polars as pl
+
+from deltabridge.local import LocalDeltaClient
+
+MY_TABLE_PATH = '/tmp/my_table'
+
+# Write a table to a local filesystem
+pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
+
+local_delta_client = LocalDeltaClient()
+table_client = local_delta_client.get_table_client(
+    table_uri=MY_TABLE_PATH  # File path can be used as table URI
+)
+```
+
+#### Unity Catalog access (vended credentials)
+`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
+credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
+for that table instead of your own storage credentials, so access follows 
+Unity Catalog grants:
+
+```python
+from deltabridge.azure import AzureDatabricksDeltaClient
+
+databricks_client = AzureDatabricksDeltaClient(
+    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
+)
+table_client = databricks_client.get_table_client('catalog.schema.table')
+```
+
+* External data access must be enabled on the metastore.
+* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
+* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
+
+Databricks tables can also be read with storage access:
+* Use the table's storage location (in Azure Blob Storage or AWS S3) as the table URI.
+    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
+* The reading identity needs read access to the storage location: at least the *Storage Blob Data Reader* permission on the storage account/container in Azure, or `s3:GetObject` and `s3:ListBucket` on the location in AWS.
+* Row filters and column masks are not applied.
+
+### Batch reads
+`load_as_delta()` and `load_as_polars()` read the latest version of the table:
+
+```python
 import deltalake
 import polars as pl
 
 from deltabridge import PartitionFilterOperator
-from deltabridge.azure import AzureDeltaClient
-
-azure_delta_client = AzureDeltaClient()
-# Reuse this client across reads; each load refreshes the table as needed.
-table_client = azure_delta_client.get_table_client(
-    table_uri=os.environ['MY_TABLE_STORAGE_URI'],
-)
 
 # Get a DeltaTable instance
 delta_table: deltalake.DeltaTable = table_client.load_as_delta()
@@ -63,76 +138,6 @@ table_df = table_client.load_as_polars(
     ],
 ).collect()
 ```
-
-#### AWS
-
-```python
-import os
-
-from deltabridge.aws import AwsDeltaClient
-
-# Credentials and region come from the default boto3 session (environment
-# variables, shared config and credentials files, instance role, ...).
-# Pass your own boto3.Session to use a specific profile or assumed role.
-aws_delta_client = AwsDeltaClient()
-table_client = aws_delta_client.get_table_client(
-    table_uri=os.environ['MY_TABLE_STORAGE_URI'],  # e.g. s3://bucket/path
-)
-
-table_df = table_client.load_as_polars().collect()
-```
-
-* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire.
-* The region of the session must be the region of the bucket.
-
-#### Local filesystem
-
-```python
-import polars as pl
-
-from deltabridge.local import LocalDeltaClient
-
-MY_TABLE_PATH = '/tmp/my_table'
-
-# Write a table to a local filesystem
-pl.DataFrame({'x': [1, 2, 3]}).write_delta(target=MY_TABLE_PATH)
-
-local_delta_client = LocalDeltaClient()
-table_client = local_delta_client.get_table_client(
-    table_uri=MY_TABLE_PATH  # File path can be used as table URI
-)
-
-# Load the data as a Polars LazyFrame and collect it into a DataFrame
-table_df = table_client.load_as_polars().collect()
-print(table_df)
-```
-
-### Unity Catalog access (vended credentials)
-`AzureDatabricksDeltaClient` reads the table by its full name with short-lived 
-credentials [vended by Unity Catalog](https://learn.microsoft.com/en-us/azure/databricks/external-access/credential-vending) 
-for that table instead of your own storage credentials, so access follows 
-Unity Catalog grants:
-
-```python
-from deltabridge.azure import AzureDatabricksDeltaClient
-
-databricks_client = AzureDatabricksDeltaClient(
-    workspace_url='https://adb-1234567890.12.azuredatabricks.net',
-)
-table_client = databricks_client.get_table_client('catalog.schema.table')
-
-table_df = table_client.load_as_polars().collect()
-```
-
-* External data access must be enabled on the metastore.
-* The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
-* Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
-
-Databricks tables can also be read with storage access:
-* Use the table's storage location (in Azure Blob Storage) as the table URI.
-    * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
-* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
-* Row filters and column masks are not applied.
 
 ## Supported Delta features
 
@@ -178,7 +183,3 @@ import deltalake
 
 deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
 ```
-
-## Cloud provider support
-Object storage support currently covers Azure Blob Storage and AWS S3 (plus 
-the local filesystem).
