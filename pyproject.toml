@@ -20,7 +20,8 @@ dependencies = [
     # for tables with deletion vectors, column mapping or checkpoint V2,
     # was added in 1.6.4.
     "deltalake>=1.6.4",
-    "polars[deltalake,pyarrow]>=1.14.0,<2.0.0"
+    # scan_parquet(extra_columns='ignore') skips internal row tracking columns.
+    "polars[deltalake,pyarrow]>=1.31.0,<2.0.0"
 ]
 readme = "README.md"
 keywords = [

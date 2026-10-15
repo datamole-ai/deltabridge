@@ -54,6 +54,28 @@ def test_start(table_uri, start, expected):
     assert stream.process_batch(pytest.fail) is None
 
 
+@pytest.mark.parametrize('start', list(StartingOffset))
+def test_internal_columns(table_uri, start):
+    write(table_uri, [1])
+    stream = load_stream(table_uri, start)
+    if start == StartingOffset.LATEST:
+        read_ids(stream)
+    write(table_uri, [2])
+    # Materialized row tracking columns are not part of the Delta schema.
+    for path in DeltaTable(table_uri).file_uris():
+        df = pl.read_parquet(path)
+        if df['id'][0] == 2:
+            df.with_columns(
+                pl.lit(42).alias('_row-id-col-test')
+            ).write_parquet(path)
+    frames = []
+    stream.process_batch(frames.append)
+    assert frames[0].columns == ['id']
+    assert sorted(frames[0]['id']) == (
+        [1, 2] if start == StartingOffset.EARLIEST else [2]
+    )
+
+
 def test_max_versions(table_uri):
     write(table_uri, [1])
     stream = load_stream(table_uri, StartingOffset.LATEST, max_versions=2)

@@ -151,6 +151,7 @@ def poll_once() -> None:
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
 * The change data feed is not needed: the stream reads the files added by each version from the Delta log.
 * Requires unpartitioned tables with reader version 1. Column mapping, deletion vectors, `TIMESTAMP_NTZ`, and schema evolution are not supported.
+* Files are read using the Delta schema. Internal row tracking columns are ignored; missing user columns raise an error.
 * Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
 * `max_versions` must be positive; it limits commits, not rows or memory. `EARLIEST` reads the entire initial snapshot in one batch.
 * Only one stream instance may use a checkpoint. For other storage, subclass `BaseCheckpoint`.

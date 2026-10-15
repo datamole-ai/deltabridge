@@ -121,11 +121,14 @@ class DeltaTableStream:
             )
 
         next_offset = StreamOffset(table.metadata().id, end)
+        schema = pa.schema(table.schema().to_arrow())
+        empty = pl.from_arrow(schema.empty_table())
         if not paths:
-            schema = pa.schema(table.schema().to_arrow())
-            return pl.from_arrow(schema.empty_table()).lazy(), next_offset
+            return empty.lazy(), next_offset
         return pl.scan_parquet(
             paths,
+            schema=empty.schema,
+            extra_columns='ignore',
             storage_options=options,
             credential_provider=None,
             glob=False,
