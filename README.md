@@ -65,7 +65,7 @@ table_client = aws_delta_client.get_table_client(
 )
 ```
 
-* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire.
+* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire. Static credentials, e.g. from the shared credentials file, are read once and never refreshed.
 * The region of the session must be the region of the bucket.
 
 ##### Local filesystem

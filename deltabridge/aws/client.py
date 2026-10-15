@@ -19,6 +19,7 @@ class AwsDeltaClient(BaseDeltaClient):
 
     def __init__(self, session: Session | None = None):
         self._session = session or Session()
+        self._region = self._session.region_name
         self._credentials = self._get_credentials()
 
     def _get_credentials(self) -> ReadOnlyCredentials:
@@ -28,9 +29,9 @@ class AwsDeltaClient(BaseDeltaClient):
         return credentials.get_frozen_credentials()
 
     def _refresh_credentials(self) -> None:
-        """Refresh the credentials if they are expired or close to expiry."""
-        # botocore refreshes temporary credentials (e.g. of an assumed role)
-        # before expiry when they are frozen, so no expiry check is needed
+        """Refresh the credentials, which botocore does close to expiry."""
+        # Freezing refreshes temporary credentials (e.g. of an assumed role)
+        # when needed; static credentials have no expiry and never change
         self._credentials = self._get_credentials()
 
     def _get_storage_options(self) -> dict[str, str]:
@@ -42,6 +43,6 @@ class AwsDeltaClient(BaseDeltaClient):
         }
         if self._credentials.token:
             storage_options['aws_session_token'] = self._credentials.token
-        if self._session.region_name:
-            storage_options['aws_region'] = self._session.region_name
+        if self._region:
+            storage_options['aws_region'] = self._region
         return storage_options
