@@ -1,6 +1,7 @@
 # deltabridge
 Thin Python wrapper for reading Delta tables from object storage (currently 
-Azure Blob Storage) or a local filesystem, with low and stable latency. 
+Azure Blob Storage and AWS S3) or a local filesystem, with low and stable 
+latency. 
 Optimized for repeated reads from long-running Python services.
 A typical use case is exposing the final products of a data pipeline 
 via a REST API, where request latency should stay predictable.
@@ -9,15 +10,18 @@ via a REST API, where request latency should stay predictable.
  > and automatic incremental caching of Delta transaction logs.
 
 ## Installation
+Install the extra for your object storage provider. The local filesystem 
+needs no extra.
 
 ```bash
-pip install deltabridge
+pip install 'deltabridge[azure]'  # Azure Blob Storage
+pip install 'deltabridge[aws]'    # AWS S3
 ```
 
 Or, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add deltabridge
+uv add 'deltabridge[azure]'
 ```
 
 ## Usage
@@ -59,6 +63,27 @@ table_df = table_client.load_as_polars(
     ],
 ).collect()
 ```
+
+#### AWS
+
+```python
+import os
+
+from deltabridge.aws import AwsDeltaClient
+
+# Credentials and region come from the default boto3 session (environment
+# variables, shared config and credentials files, instance role, ...).
+# Pass your own boto3.Session to use a specific profile or assumed role.
+aws_delta_client = AwsDeltaClient()
+table_client = aws_delta_client.get_table_client(
+    table_uri=os.environ['MY_TABLE_STORAGE_URI'],  # e.g. s3://bucket/path
+)
+
+table_df = table_client.load_as_polars().collect()
+```
+
+* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire.
+* The region of the session must be the region of the bucket.
 
 #### Local filesystem
 
@@ -155,5 +180,5 @@ deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
 ```
 
 ## Cloud provider support
-Object storage support currently covers Azure Blob Storage (plus the local 
-filesystem).
+Object storage support currently covers Azure Blob Storage and AWS S3 (plus 
+the local filesystem).
