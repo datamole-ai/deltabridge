@@ -152,16 +152,16 @@ class DeltaTableClient:
             Where to start if the checkpoint stores no offset: `LATEST`
             skips the rows already in the table, `EARLIEST` reads them.
         max_versions
-            Maximum number of table versions per batch.
+            Positive maximum number of table versions per batch.
             If not provided, all new versions are read.
 
         Returns
         -------
         DeltaTableStream
-            A stream of the rows added to the table.
+            A stream whose `process_batch` method the application schedules.
         """
         return DeltaTableStream(
-            self.load_as_delta,
+            self._table_uri,
             self._storage_options_fn,
             checkpoint,
             start,

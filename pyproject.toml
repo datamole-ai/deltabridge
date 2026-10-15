@@ -20,9 +20,7 @@ dependencies = [
     # for tables with deletion vectors, column mapping or checkpoint V2,
     # was added in 1.6.4.
     "deltalake>=1.6.4",
-    # load_as_stream needs scan_parquet(missing_columns=, extra_columns=),
-    # which was added in polars 1.31.0.
-    "polars[deltalake,pyarrow]>=1.31.0,<2.0.0"
+    "polars[deltalake,pyarrow]>=1.14.0,<2.0.0"
 ]
 readme = "README.md"
 keywords = [

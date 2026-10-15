@@ -123,18 +123,22 @@ it in a local file:
 checkpoint = local_delta_client.get_checkpoint('/tmp/my_checkpoint.json')
 stream = table_client.load_as_stream(checkpoint, max_versions=100)
 
-# Calls print with each batch of added rows until an exception
-stream.for_each_batch(print)
+
+# Create the stream once. Your API's scheduler calls this every 30 seconds.
+def poll_once():
+    stream.process_batch(print)
 ```
 
-* `for_each_batch()` waits `interval` seconds (30 by default) when there are no new versions. To stop it, e.g. on SIGTERM, pass a `threading.Event` as `stop` and set it.
-* Delivery is at-least-once: the offset is saved after the function returns.
+* `process_batch()` reads at most one batch and returns whether its checkpoint advanced. It calls the function only for nonempty batches. The application owns scheduling; calls must not overlap.
+* The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
 * Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
-* Versions which only rearrange data, e.g. OPTIMIZE, are skipped. A version which deletes or updates rows raises `ValueError`.
+* Versions which only rearrange data, e.g. OPTIMIZE, are skipped. Updates, deletes and metadata/protocol changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
 * The change data feed is not needed: the stream reads the files added by each version from the Delta log.
-* Not supported yet: partitioned tables, and struct columns of tables with column mapping.
-* Only one process may use a checkpoint. For other storage, subclass `BaseCheckpoint`.
+* Requires unpartitioned tables with reader version 1. Column mapping, deletion vectors, `TIMESTAMP_NTZ`, and schema evolution are not supported.
+* Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
+* `max_versions` must be positive; it limits commits, not rows or memory. `EARLIEST` reads the entire initial snapshot in one batch.
+* Only one stream instance may use a checkpoint. For other storage, subclass `BaseCheckpoint`.
 
 ## Supported Delta features
 
