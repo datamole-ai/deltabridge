@@ -51,7 +51,7 @@ def test_start(table_uri, start, expected):
     assert read_ids(stream) == expected
     write(table_uri, [3])
     assert read_ids(stream) == [3]
-    assert not stream.process_batch(lambda df: pytest.fail('Unexpected batch'))
+    assert stream.process_batch(pytest.fail) is None
 
 
 def test_max_versions(table_uri):
@@ -115,7 +115,7 @@ def test_checkpoint_failure_retries_same_stream(table_uri, stream, mocker):
         stream.process_batch(frames.append)
     assert stream._checkpoint.load().version == 0
     mocked_save.side_effect = save
-    assert stream.process_batch(frames.append)
+    assert stream.process_batch(frames.append) is None
     assert [df['id'].to_list() for df in frames] == [[2], [2]]
     assert stream._checkpoint.load().version == 1
 

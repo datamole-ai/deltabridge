@@ -45,18 +45,13 @@ class DeltaTableStream:
         self._offset = checkpoint.load()
         self._schema = None
 
-    def process_batch(self, func: Callable[[pl.DataFrame], None]) -> bool:
+    def process_batch(self, func: Callable[[pl.DataFrame], None]) -> None:
         """Process one batch and save its offset after the function returns.
 
         Parameters
         ----------
         func
             Function called with the rows of a nonempty batch.
-
-        Returns
-        -------
-        bool
-            Whether the checkpoint advanced, including versions with no rows.
 
         Notes
         -----
@@ -73,13 +68,12 @@ class DeltaTableStream:
         """
         rows, next_offset = self._read_batch()
         if next_offset == self._offset:
-            return False
+            return
         batch = rows.collect()
         if not batch.is_empty():
             func(batch)
         self._checkpoint.save(next_offset)
         self._offset = next_offset
-        return True
 
     def _read_batch(self) -> tuple[pl.LazyFrame, StreamOffset]:
         options = self._storage_options_fn()

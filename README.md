@@ -140,11 +140,11 @@ def process_batch(table_df: pl.DataFrame) -> None:
 
 
 # Create the stream once. Your API's scheduler calls this every 30 seconds.
-def poll_once() -> bool:
-    return stream.process_batch(process_batch)
+def poll_once() -> None:
+    stream.process_batch(process_batch)
 ```
 
-* `process_batch()` reads at most one batch and returns whether its checkpoint advanced. It calls the function only for nonempty batches. The application owns scheduling; calls must not overlap.
+* `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling; calls must not overlap.
 * The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
 * Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
 * Versions which only rearrange data, e.g. OPTIMIZE, are skipped. Updates, deletes and metadata/protocol changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
