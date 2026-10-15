@@ -120,13 +120,28 @@ version, the offset of the stream. `LocalDeltaClient.get_checkpoint()` stores
 it in a local file:
 
 ```python
-checkpoint = local_delta_client.get_checkpoint('/tmp/my_checkpoint.json')
-stream = table_client.load_as_stream(checkpoint, max_versions=100)
+import polars as pl
+
+from deltabridge.local import LocalDeltaClient
+from deltabridge.local.checkpoint import LocalCheckpoint
+from deltabridge.stream import DeltaTableStream
+
+local_delta_client: LocalDeltaClient = LocalDeltaClient()
+checkpoint: LocalCheckpoint = local_delta_client.get_checkpoint(
+    '/tmp/my_checkpoint.json'
+)
+stream: DeltaTableStream = table_client.load_as_stream(
+    checkpoint, max_versions=100
+)
+
+
+def process_batch(table_df: pl.DataFrame) -> None:
+    print(table_df)
 
 
 # Create the stream once. Your API's scheduler calls this every 30 seconds.
-def poll_once():
-    stream.process_batch(print)
+def poll_once() -> bool:
+    return stream.process_batch(process_batch)
 ```
 
 * `process_batch()` reads at most one batch and returns whether its checkpoint advanced. It calls the function only for nonempty batches. The application owns scheduling; calls must not overlap.
