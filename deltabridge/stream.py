@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import polars as pl
 import pyarrow as pa
 from deltalake import DeltaTable
+from deltalake.fs import DeltaStorageHandler
 
 from deltabridge.base_checkpoint import BaseCheckpoint, StreamOffset
 
@@ -89,9 +90,16 @@ class DeltaTableStream:
 
     def _read_batch(self) -> tuple[pl.LazyFrame, StreamOffset]:
         options = self._storage_options_fn()
+        offset = self._offset
+        # After the first call, an idle poll only checks for the next commit
+        if (
+            offset is not None
+            and self._schema is not None
+            and not self._has_commit(options, offset.version + 1)
+        ):
+            return pl.LazyFrame(), offset
         # Cached incremental replay can miss a table recreated at the same URI.
         table = DeltaTable(self._table_uri, storage_options=options)
-        offset = self._offset
         if offset is not None:
             if offset.table_id != table.metadata().id:
                 raise ValueError('The checkpoint belongs to another table.')
@@ -145,6 +153,14 @@ class DeltaTableStream:
             credential_provider=None,
             glob=False,
         ), next_offset
+
+    def _has_commit(self, options: dict[str, str], version: int) -> bool:
+        storage = DeltaStorageHandler(self._table_uri, options)
+        try:
+            storage.open_input_file(f'_delta_log/{version:020}.json')
+        except FileNotFoundError:
+            return False
+        return True
 
     def _read_versions(
         self, table: DeltaTable, options: dict[str, str], after: int, end: int

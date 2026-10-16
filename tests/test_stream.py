@@ -142,11 +142,22 @@ def test_checkpoint_failure_retries_same_stream(table_uri, stream, mocker):
     assert stream._checkpoint.load().version == 1
 
 
-@pytest.mark.parametrize('writes', [1, 3])
-def test_recreated_table(table_uri, stream, writes):
+def test_idle_poll_skips_table_load(stream, mocker):
+    load = mocker.patch('deltabridge.stream.DeltaTable')
+    assert stream.process_batch(pytest.fail) is None
+    load.assert_not_called()
+
+
+@pytest.mark.parametrize('restart', [False, True])
+def test_recreated_table(table_uri, stream, restart):
     shutil.rmtree(table_uri)
-    for i in range(writes):
-        write(table_uri, [i + 100])
+    write(table_uri, [100])
+    if restart:
+        stream = load_stream(table_uri)
+    else:
+        # A running stream detects it once the table has a newer commit
+        assert read_ids(stream) == []
+        write(table_uri, [101])
 
     with pytest.raises(ValueError, match='another table'):
         read_ids(stream)
