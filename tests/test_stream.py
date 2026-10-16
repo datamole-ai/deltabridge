@@ -6,7 +6,7 @@ from pathlib import Path
 import polars as pl
 import pyarrow.parquet as pq
 import pytest
-from deltalake import DeltaTable
+from deltalake import DeltaTable, Field, TableFeatures
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
@@ -148,7 +148,73 @@ def test_delete_fails(table_uri, stream):
     # The versions before the delete are delivered first
     assert read_ids(stream) == [3]
     for _ in range(2):
-        with pytest.raises(ValueError, match='Version 2 deletes'):
+        with pytest.raises(
+            ValueError, match='Version 2 deletes or updates rows'
+        ):
+            read_ids(stream)
+
+
+@pytest.mark.parametrize(
+    'alter',
+    [
+        lambda alter: alter.set_table_properties(
+            {'delta.logRetentionDuration': 'interval 60 days'}
+        ),
+        lambda alter: alter.set_column_metadata('id', {'comment': 'Row id'}),
+        # Writer-only feature, the reader version stays 1
+        lambda alter: alter.add_feature(
+            TableFeatures.AppendOnly, allow_protocol_versions_increase=True
+        ),
+    ],
+    ids=['properties', 'comment', 'protocol'],
+)
+def test_metadata_change(table_uri, stream, alter):
+    write(table_uri, [2])
+    alter(DeltaTable(table_uri).alter)
+    write(table_uri, [3])
+
+    assert read_ids(stream) == [2, 3]
+    assert read_ids(stream) == []
+
+
+@pytest.mark.parametrize(
+    'change',
+    [
+        lambda uri: DeltaTable(uri).alter.add_columns(Field('name', 'string')),
+        lambda uri: write_deltalake(
+            uri,
+            pl.DataFrame({'id': ['2']}),
+            mode='overwrite',
+            schema_mode='overwrite',
+        ),
+    ],
+    ids=['new column', 'changed type'],
+)
+def test_schema_change_fails(table_uri, stream, change):
+    write(table_uri, [2])
+    change(table_uri)
+
+    with pytest.raises(ValueError, match='schema changed'):
+        read_ids(stream)
+    assert stream._checkpoint.load().version == 0
+
+
+def test_reverted_schema_change_fails(table_uri, stream):
+    write(table_uri, [2])
+    DeltaTable(table_uri).alter.add_columns(Field('name', 'string'))
+    # Only the commit shows the change; the current schema matches again
+    write_deltalake(
+        table_uri,
+        pl.DataFrame({'id': [3]}),
+        mode='overwrite',
+        schema_mode='overwrite',
+    )
+
+    assert read_ids(stream) == [2]
+    for _ in range(2):
+        with pytest.raises(
+            ValueError, match='Version 2 changes the schema or partitioning'
+        ):
             read_ids(stream)
 
 

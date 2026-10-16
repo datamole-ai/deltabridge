@@ -147,7 +147,7 @@ def poll_once() -> None:
 * `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling; calls must not overlap.
 * The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
 * Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
-* Versions which only rearrange data, e.g. OPTIMIZE, are skipped. Updates, deletes and metadata/protocol changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
+* Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or writer-only protocol features. Updates, deletes and other schema changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
 * The change data feed is not needed: the stream reads the files added by each version from the Delta log.
 * Requires unpartitioned tables with reader version 1. Column mapping, deletion vectors, `TIMESTAMP_NTZ`, schema evolution, and data files referenced by absolute paths, e.g. by shallow clones, are not supported.

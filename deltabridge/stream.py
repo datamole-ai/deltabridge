@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from typing import Callable
 from urllib.parse import unquote, urlsplit
@@ -8,7 +9,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.fs as pa_fs
-from deltalake import DeltaTable
+from deltalake import DeltaTable, Schema
 from deltalake.fs import DeltaStorageHandler
 
 from deltabridge.base_checkpoint import BaseCheckpoint, StreamOffset
@@ -24,9 +25,14 @@ _COMMIT_SCHEMA = {
         }
     ),
     'remove': pl.Struct({'dataChange': pl.Boolean}),
-    'metaData': pl.Struct({'id': pl.String}),
+    'metaData': pl.Struct(
+        {'schemaString': pl.String, 'partitionColumns': pl.List(pl.String)}
+    ),
     'protocol': pl.Struct({'minReaderVersion': pl.Int64}),
 }
+
+# Keys of the Delta schema JSON other than column names and types
+_IGNORED_KEYS = {'metadata', 'nullable', 'containsNull', 'valueContainsNull'}
 
 
 class StartingOffset(StrEnum):
@@ -77,8 +83,10 @@ class DeltaTableStream:
         Raises
         ------
         ValueError
-            If the offset is invalid, or a version updates/deletes rows or
-            changes table metadata. Missing logs or files also fail the read.
+            If the offset is invalid, or a version deletes or updates rows,
+            changes column names, types or partitioning, or requires an
+            unsupported reader version. Missing logs or files also fail the
+            read.
         NotImplementedError
             If the table is partitioned, requires reader version above 1,
             or references data files by absolute paths.
@@ -102,9 +110,8 @@ class DeltaTableStream:
                 raise ValueError('The checkpoint belongs to another table.')
             if not 0 <= offset.version <= table.version():
                 raise ValueError('The checkpoint version is out of range.')
-        if (
-            table.metadata().partition_columns
-            or table.protocol().min_reader_version != 1
+        if table.metadata().partition_columns or not _supported_reader(
+            table.protocol().min_reader_version
         ):
             raise NotImplementedError(
                 'Streams require an unpartitioned table with reader version 1.'
@@ -121,8 +128,8 @@ class DeltaTableStream:
             )
             if previous.metadata().id != table.metadata().id:
                 raise ValueError('The checkpoint belongs to another table.')
-            self._schema = previous.schema()
-        if self._schema != table.schema():
+            self._schema = _columns(previous.schema())
+        if self._schema != _columns(table.schema()):
             raise ValueError('The table schema changed since the last batch.')
 
         end = table.version()
@@ -161,30 +168,64 @@ class DeltaTableStream:
             include_file_paths='commit',
         )
         add = pl.col('add').struct
+        metadata = pl.col('metaData').struct
         commits = actions.select(
             version=pl.col('commit').str.extract(r'(\d{20})\.json$').cast(int),
             path=add.field('path'),
             size=add.field('size'),
             added=add.field('dataChange'),
-            change=pl.any_horizontal(
+            deleted=pl.any_horizontal(
                 pl.col('remove').struct.field('dataChange'),
                 add.field('dataChange')
                 & add.field('deletionVector').is_not_null(),
-                pl.col('metaData').is_not_null(),
-                pl.col('protocol').is_not_null(),
             ),
+            schema=metadata.field('schemaString'),
+            partitions=metadata.field('partitionColumns'),
+            reader=pl.col('protocol').struct.field('minReaderVersion'),
         ).collect()
-        changed = commits.filter('change')['version'].min()
-        if changed is not None:
-            if changed == after + 1:
-                raise ValueError(
-                    f'Version {changed} deletes or updates rows, '
-                    'or changes table metadata.'
+        changes = {
+            version: 'deletes or updates rows'
+            for version in commits.filter('deleted')['version']
+        }
+        # Metadata and protocol actions are rare; check them in Python.
+        rows = commits.filter(
+            pl.col('schema').is_not_null() | pl.col('reader').is_not_null()
+        ).select('version', 'schema', 'partitions', 'reader')
+        for version, schema, partitions, reader in rows.iter_rows():
+            if schema is not None and (
+                partitions
+                or _columns(Schema.from_json(schema)) != self._schema
+            ):
+                changes[version] = 'changes the schema or partitioning'
+            elif reader is not None and not _supported_reader(reader):
+                changes[version] = (
+                    'changes the protocol to an unsupported reader version'
                 )
+        if changes:
+            changed = min(changes)
+            if changed == after + 1:
+                raise ValueError(f'Version {changed} {changes[changed]}.')
             # Deliver earlier versions first; the next call raises.
             end = changed - 1
         added = commits.filter('added', pl.col('version') <= end)
         return dict(zip(added['path'], added['size'])), end
+
+
+def _supported_reader(min_reader_version: int) -> bool:
+    """Whether the stream can read a table with this reader protocol."""
+    return min_reader_version == 1
+
+
+def _columns(schema: Schema) -> dict:
+    """Column names and types, ignoring nullability and metadata."""
+    return json.loads(
+        schema.to_json(),
+        object_hook=lambda obj: {
+            key: value
+            for key, value in obj.items()
+            if key not in _IGNORED_KEYS
+        },
+    )
 
 
 def _scan_files(
