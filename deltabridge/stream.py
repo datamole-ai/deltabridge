@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from typing import Callable
 from urllib.parse import urlsplit
@@ -8,9 +7,22 @@ from urllib.parse import urlsplit
 import polars as pl
 import pyarrow as pa
 from deltalake import DeltaTable
-from deltalake.fs import DeltaStorageHandler
 
 from deltabridge.base_checkpoint import BaseCheckpoint, StreamOffset
+
+# Fields of the commit actions which the stream reads; others are ignored
+_COMMIT_SCHEMA = {
+    'add': pl.Struct(
+        {
+            'path': pl.String,
+            'dataChange': pl.Boolean,
+            'deletionVector': pl.Struct({'storageType': pl.String}),
+        }
+    ),
+    'remove': pl.Struct({'dataChange': pl.Boolean}),
+    'metaData': pl.Struct({'id': pl.String}),
+    'protocol': pl.Struct({'minReaderVersion': pl.Int64}),
+}
 
 
 class StartingOffset(StrEnum):
@@ -137,31 +149,43 @@ class DeltaTableStream:
     def _read_versions(
         self, table: DeltaTable, options: dict[str, str], after: int, end: int
     ) -> tuple[list[str], int]:
-        storage = DeltaStorageHandler(table.table_uri, options)
+        root = table.table_uri.rstrip('/')
+        # Polars fetches the commits concurrently, not one request per version
+        actions = pl.scan_ndjson(
+            [
+                f'{root}/_delta_log/{version:020}.json'
+                for version in range(after + 1, end + 1)
+            ],
+            schema=_COMMIT_SCHEMA,
+            storage_options=options,
+            credential_provider=None,
+            include_file_paths='commit',
+        )
+        add = pl.col('add').struct
+        commits = actions.select(
+            version=pl.col('commit').str.extract(r'(\d{20})\.json$').cast(int),
+            path=add.field('path'),
+            added=add.field('dataChange'),
+            change=pl.any_horizontal(
+                pl.col('remove').struct.field('dataChange'),
+                add.field('dataChange')
+                & add.field('deletionVector').is_not_null(),
+                pl.col('metaData').is_not_null(),
+                pl.col('protocol').is_not_null(),
+            ),
+        ).collect()
+        changed = commits.filter('change')['version'].min()
+        if changed is not None:
+            if changed == after + 1:
+                raise ValueError(
+                    f'Version {changed} deletes or updates rows, '
+                    'or changes table metadata.'
+                )
+            # Deliver earlier versions first; the next call raises.
+            end = changed - 1
         paths = []
-        for version in range(after + 1, end + 1):
-            with storage.open_input_file(
-                f'_delta_log/{version:020}.json'
-            ) as f:
-                actions = [json.loads(line) for line in f.read().splitlines()]
-            added = [
-                a['add'] for a in actions if a.get('add', {}).get('dataChange')
-            ]
-            if (
-                any(a.get('remove', {}).get('dataChange') for a in actions)
-                or any(a.get('deletionVector') for a in added)
-                or any('metaData' in a or 'protocol' in a for a in actions)
-            ):
-                if version == after + 1:
-                    raise ValueError(
-                        f'Version {version} deletes or updates rows, '
-                        'or changes table metadata.'
-                    )
-                # Deliver earlier versions first; the next call raises.
-                return paths, version - 1
-            for add in added:
-                path = add['path']
-                if not urlsplit(path).scheme and not path.startswith('/'):
-                    path = f'{table.table_uri.rstrip("/")}/{path}'
-                paths.append(path)
+        for path in commits.filter('added', pl.col('version') <= end)['path']:
+            if not urlsplit(path).scheme and not path.startswith('/'):
+                path = f'{root}/{path}'
+            paths.append(path)
         return paths, end
