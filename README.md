@@ -150,8 +150,8 @@ def poll_once() -> None:
 * Versions which only rearrange data, e.g. OPTIMIZE, are skipped. Updates, deletes and metadata/protocol changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
 * The change data feed is not needed: the stream reads the files added by each version from the Delta log.
-* Requires unpartitioned tables with reader version 1. Column mapping, deletion vectors, `TIMESTAMP_NTZ`, and schema evolution are not supported.
-* Files are read using the Delta schema. Internal row tracking columns are ignored; missing user columns raise an error.
+* Requires unpartitioned tables with reader version 1. Column mapping, deletion vectors, `TIMESTAMP_NTZ`, schema evolution, and data files referenced by absolute paths, e.g. by shallow clones, are not supported.
+* Files are read using the Delta schema. Columns missing from a file are read as nulls; other columns, e.g. internal row tracking columns, are ignored. INT96 timestamps, which Spark and Databricks write, are read in microseconds, so dates outside 1677-2262 stay correct.
 * Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
 * `max_versions` must be positive; it limits commits, not rows or memory. `EARLIEST` reads the entire initial snapshot in one batch.
 * Only one stream instance may use a checkpoint. For other storage, subclass `BaseCheckpoint`.

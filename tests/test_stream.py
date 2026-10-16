@@ -1,9 +1,14 @@
+import json
 import shutil
+from datetime import UTC, datetime
+from pathlib import Path
 
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
 from deltalake import DeltaTable
 from deltalake.writer import write_deltalake
+from polars.testing import assert_frame_equal
 
 from deltabridge.client import DeltaTableClient
 from deltabridge.local.checkpoint import LocalCheckpoint
@@ -29,6 +34,18 @@ def read_ids(stream):
     ids = []
     stream.process_batch(lambda df: ids.extend(df['id'].to_list()))
     return sorted(ids)
+
+
+def rewrite(table_uri, version, write_file):
+    """Rewrite the files added by a version and log their new sizes."""
+    log = Path(table_uri, '_delta_log', f'{version:020}.json')
+    actions = [json.loads(line) for line in log.read_text().splitlines()]
+    for action in actions:
+        if 'add' in action:
+            path = Path(table_uri, action['add']['path'])
+            write_file(path)
+            action['add']['size'] = path.stat().st_size
+    log.write_text(''.join(json.dumps(action) + '\n' for action in actions))
 
 
 @pytest.fixture
@@ -62,18 +79,54 @@ def test_internal_columns(table_uri, start):
         read_ids(stream)
     write(table_uri, [2])
     # Materialized row tracking columns are not part of the Delta schema.
-    for path in DeltaTable(table_uri).file_uris():
-        df = pl.read_parquet(path)
-        if df['id'][0] == 2:
-            df.with_columns(
-                pl.lit(42).alias('_row-id-col-test')
-            ).write_parquet(path)
+    df = pl.DataFrame({'id': [2], '_row-id-col-test': [42]})
+    rewrite(table_uri, 1, df.write_parquet)
     frames = []
     stream.process_batch(frames.append)
     assert frames[0].columns == ['id']
     assert sorted(frames[0]['id']) == (
         [1, 2] if start == StartingOffset.EARLIEST else [2]
     )
+
+
+@pytest.mark.parametrize('start', list(StartingOffset))
+def test_int96_timestamps(table_uri, start):
+    times = [
+        datetime(1500, 1, 1, tzinfo=UTC),
+        datetime(2024, 5, 6, 7, 8, 9, 123456, tzinfo=UTC),
+        datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+    ]
+    df = pl.DataFrame({'id': [1, 2, 3], 'ts': times})
+    write_deltalake(table_uri, df.clear())
+    stream = load_stream(table_uri, start)
+    if start == StartingOffset.LATEST:
+        read_ids(stream)
+    write_deltalake(table_uri, df, mode='append')
+    # Spark writes TIMESTAMP as INT96 without the Arrow schema.
+    rewrite(
+        table_uri,
+        1,
+        lambda path: pq.write_table(
+            df.to_arrow(),
+            path,
+            use_deprecated_int96_timestamps=True,
+            store_schema=False,
+        ),
+    )
+    frames = []
+    stream.process_batch(frames.append)
+    assert_frame_equal(frames[0], df)
+
+
+def test_absolute_path_fails(table_uri, stream):
+    write(table_uri, [2])
+    log = Path(table_uri, '_delta_log', f'{1:020}.json')
+    log.write_text(
+        log.read_text().replace('"path":"', f'"path":"file://{table_uri}/')
+    )
+
+    with pytest.raises(NotImplementedError, match='relative'):
+        read_ids(stream)
 
 
 def test_max_versions(table_uri):

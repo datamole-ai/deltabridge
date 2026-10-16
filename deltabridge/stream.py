@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import polars as pl
 import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.fs as pa_fs
 from deltalake import DeltaTable
+from deltalake.fs import DeltaStorageHandler
 
 from deltabridge.base_checkpoint import BaseCheckpoint, StreamOffset
 
@@ -15,6 +18,7 @@ _COMMIT_SCHEMA = {
     'add': pl.Struct(
         {
             'path': pl.String,
+            'size': pl.Int64,
             'dataChange': pl.Boolean,
             'deletionVector': pl.Struct({'storageType': pl.String}),
         }
@@ -76,7 +80,8 @@ class DeltaTableStream:
             If the offset is invalid, or a version updates/deletes rows or
             changes table metadata. Missing logs or files also fail the read.
         NotImplementedError
-            If the table is partitioned or requires reader version above 1.
+            If the table is partitioned, requires reader version above 1,
+            or references data files by absolute paths.
         """
         rows, next_offset = self._read_batch()
         if next_offset == self._offset:
@@ -121,34 +126,28 @@ class DeltaTableStream:
             raise ValueError('The table schema changed since the last batch.')
 
         end = table.version()
-        paths = []
+        sizes = {}
         if offset is None:
             if self._start == StartingOffset.EARLIEST:
-                paths = table.file_uris()
+                actions = table.get_add_actions()
+                files = pl.DataFrame(actions.select(['path', 'size_bytes']))
+                sizes = dict(zip(files['path'], files['size_bytes']))
         elif offset.version < end:
             if self._max_versions is not None:
                 end = min(end, offset.version + self._max_versions)
-            paths, end = self._read_versions(
+            sizes, end = self._read_versions(
                 table, options, offset.version, end
             )
 
         next_offset = StreamOffset(table.metadata().id, end)
         schema = pa.schema(table.schema().to_arrow())
-        empty = pl.from_arrow(schema.empty_table())
-        if not paths:
-            return empty.lazy(), next_offset
-        return pl.scan_parquet(
-            paths,
-            schema=empty.schema,
-            extra_columns='ignore',
-            storage_options=options,
-            credential_provider=None,
-            glob=False,
-        ), next_offset
+        if not sizes:
+            return pl.from_arrow(schema.empty_table()).lazy(), next_offset
+        return _scan_files(table, options, sizes, schema), next_offset
 
     def _read_versions(
         self, table: DeltaTable, options: dict[str, str], after: int, end: int
-    ) -> tuple[list[str], int]:
+    ) -> tuple[dict[str, int], int]:
         root = table.table_uri.rstrip('/')
         # Polars fetches the commits concurrently, not one request per version
         actions = pl.scan_ndjson(
@@ -165,6 +164,7 @@ class DeltaTableStream:
         commits = actions.select(
             version=pl.col('commit').str.extract(r'(\d{20})\.json$').cast(int),
             path=add.field('path'),
+            size=add.field('size'),
             added=add.field('dataChange'),
             change=pl.any_horizontal(
                 pl.col('remove').struct.field('dataChange'),
@@ -183,9 +183,38 @@ class DeltaTableStream:
                 )
             # Deliver earlier versions first; the next call raises.
             end = changed - 1
-        paths = []
-        for path in commits.filter('added', pl.col('version') <= end)['path']:
-            if not urlsplit(path).scheme and not path.startswith('/'):
-                path = f'{root}/{path}'
-            paths.append(path)
-        return paths, end
+        added = commits.filter('added', pl.col('version') <= end)
+        return dict(zip(added['path'], added['size'])), end
+
+
+def _scan_files(
+    table: DeltaTable,
+    options: dict[str, str],
+    sizes: dict[str, int],
+    schema: pa.Schema,
+) -> pl.LazyFrame:
+    """Scan data files given by their add action paths and sizes."""
+    known_sizes = {}
+    for path, size in sizes.items():
+        if urlsplit(path).scheme or path.startswith('/'):
+            raise NotImplementedError(
+                'Streams require data file paths relative to the table.'
+            )
+        known_sizes[unquote(path)] = size
+    # Known sizes spare a HEAD request per file, which holds the GIL.
+    fs = pa_fs.PyFileSystem(
+        DeltaStorageHandler(table.table_uri, options, known_sizes)
+    )
+    # Spark writes TIMESTAMP as INT96; nanoseconds overflow outside 1677-2262.
+    fmt = ds.ParquetFileFormat(
+        read_options=ds.ParquetReadOptions(coerce_int96_timestamp_unit='us'),
+        default_fragment_scan_options=ds.ParquetFragmentScanOptions(
+            pre_buffer=True
+        ),
+    )
+    fragments = [
+        fmt.make_fragment(path, filesystem=fs) for path in known_sizes
+    ]
+    return pl.scan_pyarrow_dataset(
+        ds.FileSystemDataset(fragments, schema, fmt, fs)
+    )
