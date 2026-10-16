@@ -1,1 +1,2 @@
 from deltabridge.client import PartitionFilterOperator
+from deltabridge.stream import StartingOffset

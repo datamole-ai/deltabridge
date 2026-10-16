@@ -24,7 +24,7 @@ uv add deltabridge
 
 ### Access
 A client gives a table client for each table, which [batch reads](#batch-reads) 
-use. Reuse the table client across 
+and [streaming reads](#streaming-reads) use. Reuse the table client across 
 reads; each load refreshes the table as needed.
 
 #### Storage access (own credentials)
@@ -113,7 +113,53 @@ table_df = table_client.load_as_polars(
 ).collect()
 ```
 
+### Streaming reads
+`load_as_stream()` reads the rows added by new table versions, like a Spark 
+structured streaming read of a Delta table. A checkpoint stores the last read 
+version, the offset of the stream. `LocalDeltaClient.get_checkpoint()` stores 
+it in a local file:
+
+```python
+import polars as pl
+
+from deltabridge.local import LocalDeltaClient
+from deltabridge.local.checkpoint import LocalCheckpoint
+from deltabridge.stream import DeltaTableStream
+
+local_delta_client: LocalDeltaClient = LocalDeltaClient()
+checkpoint: LocalCheckpoint = local_delta_client.get_checkpoint(
+    '/tmp/my_checkpoint.json'
+)
+stream: DeltaTableStream = table_client.load_as_stream(
+    checkpoint, max_versions=100
+)
+
+
+def process_batch(table_df: pl.DataFrame) -> None:
+    print(table_df)
+
+
+# Create the stream once. Your API's scheduler calls this every 30 seconds.
+def poll_once() -> None:
+    stream.process_batch(process_batch)
+```
+
+* `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling; calls must not overlap.
+* The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
+* Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
+* Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or supported protocol features. Updates, deletes and other schema changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
+* A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
+* The change data feed is not needed: the stream reads the files added by each version from the Delta log.
+* Requires unpartitioned tables with reader version 1, or reader version 3 with only the reader features deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`. Column mapping, type widening, other reader features, schema evolution, and data files referenced by absolute paths, e.g. by shallow clones, are not supported.
+* `StartingOffset.EARLIEST` without a stored offset raises `NotImplementedError` if files of the table have deletion vectors, since reading the files would return deleted rows. Start at `LATEST`, or purge the deletion vectors first, e.g. with `REORG TABLE ... APPLY (PURGE)`.
+* Files are read using the Delta schema. Columns missing from a file are read as nulls; other columns, e.g. internal row tracking columns, are ignored. INT96 timestamps, which Spark and Databricks write, are read in microseconds, so dates outside 1677-2262 stay correct.
+* Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
+* `max_versions` must be positive; it limits commits, not rows or memory. `EARLIEST` reads the entire initial snapshot in one batch.
+* Only one stream instance may use a checkpoint. For other storage, subclass `BaseCheckpoint`.
+
 ## Supported Delta features
+
+For `load_as_stream()`, see the limitations in [Streaming reads](#streaming-reads).
 
 ### Features that change the read protocol
 
