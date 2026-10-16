@@ -2,6 +2,7 @@ import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -13,6 +14,14 @@ from polars.testing import assert_frame_equal
 from deltabridge.client import DeltaTableClient
 from deltabridge.local.checkpoint import LocalCheckpoint
 from deltabridge.stream import StartingOffset
+
+# Inline deletion vector of the rows 0 and 1
+DELETION_VECTOR = {
+    'storageType': 'i',
+    'pathOrInlineDv': '^Bg9^0rr910000000000iXQKl0rr91000315c8Xg00031',
+    'sizeInBytes': 36,
+    'cardinality': 2,
+}
 
 
 @pytest.fixture
@@ -46,6 +55,40 @@ def rewrite(table_uri, version, write_file):
             write_file(path)
             action['add']['size'] = path.stat().st_size
     log.write_text(''.join(json.dumps(action) + '\n' for action in actions))
+
+
+def commit(table_uri, *actions):
+    """Append a hand-written commit to the Delta log."""
+    version = DeltaTable(table_uri).version() + 1
+    log = Path(table_uri, '_delta_log', f'{version:020}.json')
+    log.write_text(''.join(json.dumps(action) + '\n' for action in actions))
+
+
+def protocol(*features):
+    """Protocol action requiring reader version 3 and the features."""
+    return {
+        'protocol': {
+            'minReaderVersion': 3,
+            'minWriterVersion': 7,
+            'readerFeatures': list(features),
+            'writerFeatures': list(features),
+        }
+    }
+
+
+def append(table_uri, ids, **add):
+    """Append rows by hand; delta-rs cannot write some features."""
+    path = Path(table_uri, f'{uuid4()}.parquet')
+    pl.DataFrame({'id': ids}).write_parquet(path)
+    add = {
+        'path': path.name,
+        'partitionValues': {},
+        'size': path.stat().st_size,
+        'modificationTime': 0,
+        'dataChange': True,
+        'stats': json.dumps({'numRecords': len(ids)}),
+    } | add
+    commit(table_uri, {'add': add})
 
 
 @pytest.fixture
@@ -118,6 +161,87 @@ def test_int96_timestamps(table_uri, start):
     assert_frame_equal(frames[0], df)
 
 
+@pytest.mark.parametrize('start', list(StartingOffset))
+def test_timestamp_ntz(table_uri, start):
+    times = [
+        datetime(1500, 1, 1),
+        datetime(2024, 5, 6, 7, 8, 9, 123456),
+        datetime(9999, 12, 31, 23, 59, 59, 999999),
+    ]
+    df = pl.DataFrame({'id': [1, 2, 3], 'ts': times})
+    # Naive datetimes create a TIMESTAMP_NTZ column
+    write_deltalake(table_uri, df.clear())
+    stream = load_stream(table_uri, start)
+    if start == StartingOffset.LATEST:
+        read_ids(stream)
+    write_deltalake(table_uri, df, mode='append')
+    frames = []
+    stream.process_batch(frames.append)
+    assert frames[0].schema['ts'] == pl.Datetime('us')
+    assert_frame_equal(frames[0], df)
+
+
+@pytest.mark.parametrize('start', list(StartingOffset))
+@pytest.mark.parametrize(
+    'feature',
+    ['deletionVectors', 'v2Checkpoint', 'vacuumProtocolCheck', 'timestampNtz'],
+)
+def test_supported_reader_feature(table_uri, feature, start):
+    write(table_uri, [1])
+    commit(table_uri, protocol(feature))
+    # The checkpoint of a v2Checkpoint table has the V2 format
+    DeltaTable(table_uri).create_checkpoint()
+    stream = load_stream(table_uri, start)
+
+    assert read_ids(stream) == (
+        [1] if start == StartingOffset.EARLIEST else []
+    )
+    append(table_uri, [2])
+    assert read_ids(stream) == [2]
+
+
+@pytest.mark.parametrize(
+    'action',
+    [
+        {'protocol': {'minReaderVersion': 2, 'minWriterVersion': 5}},
+        protocol('columnMapping'),
+        protocol('deletionVectors', 'typeWidening'),
+    ],
+    ids=['reader version 2', 'columnMapping', 'typeWidening'],
+)
+def test_unsupported_reader_feature_fails(table_uri, action):
+    write(table_uri, [1])
+    commit(table_uri, action)
+
+    with pytest.raises(NotImplementedError, match='reader version'):
+        read_ids(load_stream(table_uri))
+
+
+def test_unsupported_reader_feature_in_version_fails(table_uri, stream):
+    write(table_uri, [2])
+    commit(table_uri, protocol('typeWidening'))
+    # Dropping the feature again leaves a supported current protocol
+    commit(table_uri, protocol('deletionVectors'))
+
+    assert read_ids(stream) == [2]
+    with pytest.raises(
+        ValueError,
+        match='Version 2 changes the protocol to an unsupported reader',
+    ):
+        read_ids(stream)
+
+
+def test_earliest_with_deletion_vectors_fails(table_uri):
+    write(table_uri, [1])
+    commit(table_uri, protocol('deletionVectors'))
+    append(table_uri, [2, 3, 4], deletionVector=DELETION_VECTOR)
+
+    with pytest.raises(NotImplementedError, match='deletion vectors'):
+        read_ids(load_stream(table_uri))
+    # LATEST skips the rows already in the table
+    assert read_ids(load_stream(table_uri, StartingOffset.LATEST)) == []
+
+
 def test_absolute_path_fails(table_uri, stream):
     write(table_uri, [2])
     log = Path(table_uri, '_delta_log', f'{1:020}.json')
@@ -165,8 +289,12 @@ def test_delete_fails(table_uri, stream):
         lambda alter: alter.add_feature(
             TableFeatures.AppendOnly, allow_protocol_versions_increase=True
         ),
+        lambda alter: alter.add_feature(
+            TableFeatures.DeletionVectors,
+            allow_protocol_versions_increase=True,
+        ),
     ],
-    ids=['properties', 'comment', 'protocol'],
+    ids=['properties', 'comment', 'writer feature', 'reader feature'],
 )
 def test_metadata_change(table_uri, stream, alter):
     write(table_uri, [2])

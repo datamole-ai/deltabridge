@@ -28,7 +28,17 @@ _COMMIT_SCHEMA = {
     'metaData': pl.Struct(
         {'schemaString': pl.String, 'partitionColumns': pl.List(pl.String)}
     ),
-    'protocol': pl.Struct({'minReaderVersion': pl.Int64}),
+    'protocol': pl.Struct(
+        {'minReaderVersion': pl.Int64, 'readerFeatures': pl.List(pl.String)}
+    ),
+}
+
+# Reader features which do not change how the stream reads appended files
+_READER_FEATURES = {
+    'deletionVectors',
+    'v2Checkpoint',
+    'vacuumProtocolCheck',
+    'timestampNtz',
 }
 
 # Keys of the Delta schema JSON other than column names and types
@@ -85,11 +95,12 @@ class DeltaTableStream:
         ValueError
             If the offset is invalid, or a version deletes or updates rows,
             changes column names, types or partitioning, or requires an
-            unsupported reader version. Missing logs or files also fail the
-            read.
+            unsupported reader protocol. Missing logs or files also fail
+            the read.
         NotImplementedError
-            If the table is partitioned, requires reader version above 1,
-            or references data files by absolute paths.
+            If the table is partitioned, requires an unsupported reader
+            protocol or references data files by absolute paths, or if a
+            stream starting at `EARLIEST` finds deletion vectors.
         """
         rows, next_offset = self._read_batch()
         if next_offset == self._offset:
@@ -110,11 +121,14 @@ class DeltaTableStream:
                 raise ValueError('The checkpoint belongs to another table.')
             if not 0 <= offset.version <= table.version():
                 raise ValueError('The checkpoint version is out of range.')
+        protocol = table.protocol()
         if table.metadata().partition_columns or not _supported_reader(
-            table.protocol().min_reader_version
+            protocol.min_reader_version, protocol.reader_features
         ):
             raise NotImplementedError(
-                'Streams require an unpartitioned table with reader version 1.'
+                'Streams require an unpartitioned table with reader version '
+                '1, or reader version 3 with only the reader features '
+                f'{", ".join(sorted(_READER_FEATURES))}.'
             )
         if self._schema is None:
             previous = (
@@ -136,6 +150,14 @@ class DeltaTableStream:
         sizes = {}
         if offset is None:
             if self._start == StartingOffset.EARLIEST:
+                # Reading the files as they are would restore deleted rows.
+                if 'deletionVectors' in (protocol.reader_features or []) and (
+                    table.deletion_vectors().read_all().num_rows
+                ):
+                    raise NotImplementedError(
+                        'Streams cannot start at EARLIEST while files of the '
+                        'table have deletion vectors.'
+                    )
                 actions = table.get_add_actions()
                 files = pl.DataFrame(actions.select(['path', 'size_bytes']))
                 sizes = dict(zip(files['path'], files['size_bytes']))
@@ -182,6 +204,7 @@ class DeltaTableStream:
             schema=metadata.field('schemaString'),
             partitions=metadata.field('partitionColumns'),
             reader=pl.col('protocol').struct.field('minReaderVersion'),
+            features=pl.col('protocol').struct.field('readerFeatures'),
         ).collect()
         changes = {
             version: 'deletes or updates rows'
@@ -190,14 +213,16 @@ class DeltaTableStream:
         # Metadata and protocol actions are rare; check them in Python.
         rows = commits.filter(
             pl.col('schema').is_not_null() | pl.col('reader').is_not_null()
-        ).select('version', 'schema', 'partitions', 'reader')
-        for version, schema, partitions, reader in rows.iter_rows():
+        ).select('version', 'schema', 'partitions', 'reader', 'features')
+        for version, schema, partitions, reader, features in rows.iter_rows():
             if schema is not None and (
                 partitions
                 or _columns(Schema.from_json(schema)) != self._schema
             ):
                 changes[version] = 'changes the schema or partitioning'
-            elif reader is not None and not _supported_reader(reader):
+            elif reader is not None and not _supported_reader(
+                reader, features
+            ):
                 changes[version] = (
                     'changes the protocol to an unsupported reader version'
                 )
@@ -211,9 +236,14 @@ class DeltaTableStream:
         return dict(zip(added['path'], added['size'])), end
 
 
-def _supported_reader(min_reader_version: int) -> bool:
+def _supported_reader(
+    min_reader_version: int, reader_features: list[str] | None
+) -> bool:
     """Whether the stream can read a table with this reader protocol."""
-    return min_reader_version == 1
+    return min_reader_version == 1 or (
+        min_reader_version == 3
+        and set(reader_features or []) <= _READER_FEATURES
+    )
 
 
 def _columns(schema: Schema) -> dict:
