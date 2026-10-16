@@ -6,6 +6,7 @@ from typing import Any, Callable
 import polars as pl
 from deltalake import DeltaTable
 from deltalake.exceptions import DeltaProtocolError
+from pyarrow.dataset import ParquetReadOptions
 
 from deltabridge.base_checkpoint import BaseCheckpoint
 from deltabridge.stream import DeltaTableStream, StartingOffset
@@ -131,6 +132,10 @@ class DeltaTableClient:
         else:
             # No partition filter for non-partitioned tables
             pyarrow_options = {}
+        # Spark writes INT96 timestamps, which overflow ns outside 1677-2262
+        pyarrow_options['parquet_read_options'] = ParquetReadOptions(
+            coerce_int96_timestamp_unit='us'
+        )
 
         return pl.scan_delta(
             source=table, use_pyarrow=True, pyarrow_options=pyarrow_options
