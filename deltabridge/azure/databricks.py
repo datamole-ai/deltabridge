@@ -5,12 +5,20 @@ from functools import partial
 from typing import Any
 
 from azure.core import PipelineClient
+from azure.core.configuration import Configuration
 from azure.core.credentials import TokenCredential
-from azure.core.pipeline.policies import BearerTokenCredentialPolicy
+from azure.core.pipeline.policies import (
+    BearerTokenCredentialPolicy,
+    RetryPolicy,
+)
 from azure.core.rest import HttpRequest
 from azure.identity import ChainedTokenCredential, DefaultAzureCredential
 
 from deltabridge.client import DeltaTableClient
+
+# RetryPolicy does not retry POST by default, but the Unity Catalog endpoints
+# used here only read, so temporary-table-credentials is safe to retry too
+_RETRY_METHODS = frozenset({'GET', 'POST'})
 
 
 class AzureDatabricksDeltaClient:
@@ -31,8 +39,13 @@ class AzureDatabricksDeltaClient:
         credential: TokenCredential | ChainedTokenCredential | None = None,
     ):
         self._api_url = f'{workspace_url.rstrip("/")}/api/2.1/unity-catalog'
+        config = Configuration()
+        # Retries transient errors, e.g. a keep-alive connection which the
+        # server closed in the meantime, with exponential backoff
+        config.retry_policy = RetryPolicy()
         self._client = PipelineClient(
             base_url=workspace_url,
+            config=config,
             per_retry_policies=[
                 BearerTokenCredentialPolicy(
                     credential or DefaultAzureCredential(),
@@ -96,6 +109,8 @@ class AzureDatabricksDeltaClient:
         self, method: str, path: str, **kwargs: Any
     ) -> dict[str, Any]:
         request = HttpRequest(method, f'{self._api_url}/{path}', **kwargs)
-        response = self._client.send_request(request)
+        response = self._client.send_request(
+            request, retry_on_methods=_RETRY_METHODS
+        )
         response.raise_for_status()
         return response.json()
