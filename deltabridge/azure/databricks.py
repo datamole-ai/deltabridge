@@ -16,8 +16,6 @@ from azure.identity import ChainedTokenCredential, DefaultAzureCredential
 
 from deltabridge.client import DeltaTableClient
 
-# RetryPolicy does not retry POST by default, but the Unity Catalog endpoints
-# used here only read, so temporary-table-credentials is safe to retry too
 _RETRY_METHODS = frozenset({'GET', 'POST'})
 
 
@@ -40,8 +38,6 @@ class AzureDatabricksDeltaClient:
     ):
         self._api_url = f'{workspace_url.rstrip("/")}/api/2.1/unity-catalog'
         config = Configuration()
-        # Retries transient errors, e.g. a keep-alive connection which the
-        # server closed in the meantime, with exponential backoff
         config.retry_policy = RetryPolicy()
         self._client = PipelineClient(
             base_url=workspace_url,
