@@ -7,13 +7,13 @@ class LocalDeltaClient(BaseDeltaClient):
     Local Delta client.
     """
 
-    def get_checkpoint(self, path: str) -> LocalCheckpoint:
+    def get_checkpoint(self, uri: str) -> LocalCheckpoint:
         """
         Get a checkpoint stored in a local file.
 
         Parameters
         ----------
-        path: str
+        uri: str
             Path of the file.
 
         Returns
@@ -21,7 +21,7 @@ class LocalDeltaClient(BaseDeltaClient):
         LocalCheckpoint
             A checkpoint stored in the file.
         """
-        return LocalCheckpoint(path)
+        return LocalCheckpoint(uri)
 
     def _get_storage_options(self) -> dict[str, str]:
         """Get the storage options for the Delta table."""
