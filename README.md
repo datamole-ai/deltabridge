@@ -131,7 +131,7 @@ from deltabridge.stream import DeltaTableStream
 
 local_delta_client: LocalDeltaClient = LocalDeltaClient()
 checkpoint: LocalCheckpoint = local_delta_client.get_checkpoint(
-    '/tmp/my_checkpoint.json'
+    '/data/my_checkpoint.json'  # on a persistent volume
 )
 stream: DeltaTableStream = table_client.load_as_stream(
     checkpoint, max_versions=100
