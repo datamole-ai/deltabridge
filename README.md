@@ -115,9 +115,12 @@ table_df = table_client.load_as_polars(
 
 ### Streaming reads
 `load_as_stream()` reads the rows added by new table versions, like a Spark 
-structured streaming read of a Delta table. A checkpoint stores the last read 
-version, the offset of the stream. `LocalDeltaClient.get_checkpoint()` stores 
-it in a local file:
+structured streaming read of a Delta table. It is meant for one process in 
+one pod, and each batch must fit in its memory. If a batch does not fit or you 
+need more throughput, use Spark Structured Streaming.
+
+A checkpoint stores the last read version, the offset of the stream. 
+`LocalDeltaClient.get_checkpoint()` stores it in a local file:
 
 ```python
 import polars as pl
@@ -155,7 +158,7 @@ def poll_once() -> None:
 * Files are read using the Delta schema. Columns missing from a file are read as nulls; other columns, e.g. internal row tracking columns, are ignored. INT96 timestamps, which Spark and Databricks write, are read in microseconds, so dates outside 1677-2262 stay correct.
 * Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
 * `max_versions` must be positive; it limits commits, not rows or memory. `EARLIEST` reads the entire initial snapshot in one batch.
-* Only one stream instance may use a checkpoint. For other storage, subclass `BaseCheckpoint`.
+* Run one stream instance per checkpoint. Instances sharing a checkpoint, e.g. pods during a rolling update, deliver some batches twice; the `Recreate` strategy avoids it. Keep the checkpoint on a persistent volume, so a new pod resumes from it.
 
 ## Supported Delta features
 
