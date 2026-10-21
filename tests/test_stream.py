@@ -1,7 +1,9 @@
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -297,3 +299,32 @@ def test_recreated_table(table_uri, stream):
     with pytest.raises(ValueError, match='another table'):
         read_ids(stream)
     assert stream._checkpoint.load().version == 0
+
+
+def test_overlapping_calls_wait(table_uri, stream):
+    write(table_uri, [2])
+    ids = []
+    blocked, release, called = Event(), Event(), Event()
+
+    def block(df):
+        ids.extend(df['id'].to_list())
+        blocked.set()
+        release.wait(timeout=10)
+
+    def record(df):
+        # The first call saved its offset before this one read the table
+        assert stream._checkpoint.load().version == 1
+        ids.extend(df['id'].to_list())
+        called.set()
+
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(stream.process_batch, block)
+        assert blocked.wait(timeout=10)
+        write(table_uri, [3])
+        second = pool.submit(stream.process_batch, record)
+        assert not called.wait(timeout=0.5)
+        release.set()
+        first.result(timeout=10)
+        second.result(timeout=10)
+    assert ids == [2, 3]
+    assert stream._checkpoint.load().version == 2
