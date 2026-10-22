@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Callable
 from urllib.parse import unquote, urlsplit
 
@@ -53,7 +54,9 @@ class DeltaTableStream:
     """Stream of appended rows, created by `DeltaTableClient.load_as_stream`.
 
     The application schedules `process_batch` calls. Only one stream may use
-    a checkpoint, and calls must not overlap.
+    a checkpoint. A call made while another call on the same stream runs
+    returns at once, so batches never run concurrently and calls never pile
+    up.
     """
 
     def __init__(
@@ -71,6 +74,7 @@ class DeltaTableStream:
         self._max_versions = max_versions
         self._offset = checkpoint.load()
         self._column_types = None
+        self._lock = threading.Lock()
 
     def process_batch(self, func: Callable[[pl.DataFrame], None]) -> None:
         """Process one batch and save its offset after the function returns.
@@ -90,18 +94,26 @@ class DeltaTableStream:
 
         Notes
         -----
-        Delivery is at-least-once. Other errors, e.g. from storage, the
-        function or saving the checkpoint, leave the offset unchanged, so
-        the call can be retried. Missing logs or files also fail the read.
+        A call made while another call on the same stream runs returns at
+        once without reading; a later call reads the new rows. Delivery is
+        at-least-once. Other errors, e.g. from storage, the function or
+        saving the checkpoint, leave the offset unchanged, so the call can be
+        retried. Missing logs or files also fail the read.
         """
-        rows, next_offset = self._read_batch()
-        if next_offset == self._offset:
+        # Waiting calls would pile up while batches outlast the schedule
+        if not self._lock.acquire(blocking=False):
             return
-        batch = rows.collect()
-        if not batch.is_empty():
-            func(batch)
-        self._checkpoint.save(next_offset)
-        self._offset = next_offset
+        try:
+            rows, next_offset = self._read_batch()
+            if next_offset == self._offset:
+                return
+            batch = rows.collect()
+            if not batch.is_empty():
+                func(batch)
+            self._checkpoint.save(next_offset)
+            self._offset = next_offset
+        finally:
+            self._lock.release()
 
     def _read_batch(self) -> tuple[pl.LazyFrame, StreamOffset]:
         options = self._storage_options_fn()

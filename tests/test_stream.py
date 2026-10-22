@@ -1,7 +1,9 @@
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -311,3 +313,28 @@ def test_failure_retries(table_uri, stream, mocker, failing, restart):
         stream = load_stream(table_uri)
     assert read_ids(stream) == [2]
     assert read_ids(stream) == []
+
+
+def test_overlapping_call_returns(table_uri, stream):
+    write(table_uri, [2])
+    ids = []
+    blocked, release = Event(), Event()
+
+    def block(df):
+        ids.extend(df['id'].to_list())
+        blocked.set()
+        release.wait(timeout=10)
+
+    with ThreadPoolExecutor(1) as pool:
+        running = pool.submit(stream.process_batch, block)
+        assert blocked.wait(timeout=10)
+        write(table_uri, [3])
+        # Reading now would deliver row 2 again before the offset is saved
+        assert stream.process_batch(pytest.fail) is None
+        release.set()
+        running.result(timeout=10)
+    assert ids == [2]
+    assert stream._checkpoint.load().version == 1
+    # The next call reads the rows which the overlapping call skipped
+    assert read_ids(stream) == [3]
+    assert stream._checkpoint.load().version == 2
