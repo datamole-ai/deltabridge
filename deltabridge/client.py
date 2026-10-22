@@ -9,7 +9,7 @@ from deltalake.exceptions import DeltaProtocolError
 
 from deltabridge.base_checkpoint import BaseCheckpoint
 from deltabridge.parquet import PARQUET_READ_OPTIONS
-from deltabridge.stream import DeltaTableStream, StartingOffset
+from deltabridge.stream import DeltaTableStream
 
 
 class PartitionFilterOperator(StrEnum):
@@ -141,18 +141,17 @@ class DeltaTableClient:
     def load_as_stream(
         self,
         checkpoint: BaseCheckpoint,
-        start: StartingOffset = StartingOffset.LATEST,
         max_versions: int | None = None,
     ) -> DeltaTableStream:
         """Load the rows added to a Delta table as a stream.
+
+        A new stream starts at the current table version and skips the rows
+        already in the table.
 
         Parameters
         ----------
         checkpoint
             Checkpoint which stores the offset of the stream.
-        start
-            Where to start if the checkpoint stores no offset: `LATEST`
-            skips the rows already in the table, `EARLIEST` reads them.
         max_versions
             Positive maximum number of table versions per batch.
             If not provided, all new versions are read.
@@ -171,6 +170,5 @@ class DeltaTableClient:
             self._table_uri,
             self._storage_options_fn,
             checkpoint,
-            start,
             max_versions,
         )

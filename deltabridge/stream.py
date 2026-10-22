@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Callable
 from urllib.parse import unquote, urlsplit
 
@@ -42,13 +41,6 @@ _SUPPORTED_READER_FEATURES = {
 }
 
 
-class StartingOffset(StrEnum):
-    """Where a stream starts if its checkpoint stores no offset."""
-
-    LATEST = 'latest'
-    EARLIEST = 'earliest'
-
-
 class DeltaTableStream:
     """Stream of appended rows, created by `DeltaTableClient.load_as_stream`.
 
@@ -61,7 +53,6 @@ class DeltaTableStream:
         table_uri: str,
         storage_options_fn: Callable[[], dict[str, str]],
         checkpoint: BaseCheckpoint,
-        start: StartingOffset = StartingOffset.LATEST,
         max_versions: int | None = None,
     ):
         if max_versions is not None and max_versions <= 0:
@@ -69,7 +60,6 @@ class DeltaTableStream:
         self._table_uri = table_uri
         self._storage_options_fn = storage_options_fn
         self._checkpoint = checkpoint
-        self._start = StartingOffset(start)
         self._max_versions = max_versions
         self._offset = checkpoint.load()
         self._column_types = None
@@ -90,9 +80,8 @@ class DeltaTableStream:
             updates rows or changes column names or types.
         NotImplementedError
             If the current table or a version after the checkpoint is
-            partitioned or requires an unsupported reader protocol, if data
-            files are referenced by absolute paths, or if a stream starting
-            at `EARLIEST` finds deletion vectors.
+            partitioned or requires an unsupported reader protocol, or if
+            data files are referenced by absolute paths.
 
         Notes
         -----
@@ -114,7 +103,9 @@ class DeltaTableStream:
         # Cached incremental replay can miss a table recreated at the same URI.
         table = DeltaTable(self._table_uri, storage_options=options)
         if self._offset is None:
-            sizes, end = self._read_start(table)
+            # A new stream skips the rows already in the table.
+            _check_supported(table)
+            sizes, end = {}, table.version()
         else:
             sizes, end = self._read_resume(table, options, self._offset)
         next_offset = StreamOffset(table.metadata().id, end)
@@ -123,26 +114,6 @@ class DeltaTableStream:
             return pl.from_arrow(schema.empty_table()).lazy(), next_offset
         rows = _scan_files(table.table_uri, options, sizes, schema)
         return rows, next_offset
-
-    def _read_start(self, table: DeltaTable) -> tuple[dict[str, int], int]:
-        """File sizes and end version of a batch without a stored offset."""
-        _check_supported(table)
-        # Nothing was delivered yet, so the current columns are the baseline.
-        self._column_types = _column_types(table.schema())
-        end = table.version()
-        if self._start == StartingOffset.LATEST:
-            return {}, end
-        # Reading the files as they are would restore deleted rows.
-        if 'deletionVectors' in (table.protocol().reader_features or []) and (
-            table.deletion_vectors().read_all().num_rows
-        ):
-            raise NotImplementedError(
-                'Streams cannot start at EARLIEST while files of the '
-                'table have deletion vectors.'
-            )
-        actions = table.get_add_actions()
-        files = pl.DataFrame(actions.select(['path', 'size_bytes']))
-        return dict(zip(files['path'], files['size_bytes'])), end
 
     def _read_resume(
         self, table: DeltaTable, options: dict[str, str], offset: StreamOffset
