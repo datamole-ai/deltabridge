@@ -3,8 +3,10 @@ from datetime import datetime
 from pathlib import Path
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
-from deltalake import DeltaTable
+from deltalake import DeltaTable, convert_to_deltalake
 from deltalake.exceptions import DeltaProtocolError
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
@@ -149,6 +151,28 @@ def test_load_as_polars_with_column_mapping(column_mapping_table_uri):
     )
     with pytest.raises(DeltaProtocolError):
         delta_table_client.load_as_polars()
+
+
+def test_load_as_polars_with_int96_timestamps(tmp_path):
+    # Spark writes timestamps as INT96, without the Arrow schema in the file
+    timestamps = [
+        datetime(1500, 1, 1),
+        datetime(2024, 5, 6, 7, 8, 9, 123456),
+        datetime(9999, 12, 31, 23, 59, 59),
+    ]
+    pq.write_table(
+        pa.table({'ts': pa.array(timestamps, pa.timestamp('us'))}),
+        tmp_path / 'part-0.parquet',
+        use_deprecated_int96_timestamps=True,
+        store_schema=False,
+    )
+    convert_to_deltalake(tmp_path)
+    delta_table_client = DeltaTableClient(
+        table_uri=str(tmp_path),
+        storage_options_fn=lambda: {},
+    )
+    table_df = delta_table_client.load_as_polars().collect()
+    assert table_df['ts'].to_list() == timestamps
 
 
 def test_storage_options_rotation_rebuilds_table(temp_delta_table_uri, mocker):

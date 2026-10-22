@@ -29,8 +29,8 @@ uv add 'deltabridge[azure]'
 
 ### Access
 A client gives a table client for each table, which [batch reads](#batch-reads) 
-use. Reuse the table client across reads; each load refreshes the table as 
-needed.
+use. Reuse the table client across 
+reads; each load refreshes the table as needed.
 
 #### Storage access (own credentials)
 Object storage support currently covers Azure Blob Storage and AWS S3, plus 
