@@ -59,8 +59,7 @@ class DeltaTableStream:
     The application schedules `process_batch` calls. Only one stream may use
     a checkpoint. A call made while another call on the same stream runs
     returns at once, so batches never run concurrently and calls never pile
-    up. Spark Structured Streaming inspired this; it runs one micro-batch at
-    a time.
+    up.
     """
 
     def __init__(
