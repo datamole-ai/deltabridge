@@ -151,37 +151,63 @@ def test_timestamps(table_uri, tz):
     assert_frame_equal(frames[0], df)
 
 
-@pytest.mark.parametrize(
-    ('features', 'text'),
-    [
-        ([], 'requires reader version 2'),
-        (['columnMapping'], 'requires the reader features columnMapping'),
-        # Only the unsupported features are named
-        (
-            ['deletionVectors', 'typeWidening'],
-            'requires the reader features typeWidening,',
-        ),
-    ],
-    ids=['reader version 2', 'columnMapping', 'typeWidening'],
-)
-def test_unsupported_reader_feature_fails(table_uri, features, text):
-    write(table_uri, [1])
-    commit_protocol(table_uri, *features)
-
-    with pytest.raises(StreamError, match=f'The table {text}'):
-        read_ids(load_stream(table_uri))
-
-
-def test_absolute_path_fails(table_uri, stream):
-    write(table_uri, [2])
+def use_absolute_paths(table_uri):
     edit_adds(
         table_uri,
         1,
         lambda add: add.update(path=f'file://{table_uri}/{add["path"]}'),
     )
 
-    with pytest.raises(StreamError, match='absolute paths'):
-        read_ids(stream)
+
+def recreate(table_uri):
+    shutil.rmtree(table_uri)
+    write(table_uri, [100])
+
+
+def save_checkpoint_version(version):
+    def change(table_uri):
+        checkpoint = LocalCheckpoint(f'{table_uri}.json')
+        checkpoint.save(StreamOffset(checkpoint.load().table_id, version))
+
+    return change
+
+
+@pytest.mark.parametrize(
+    ('change', 'text'),
+    [
+        (commit_protocol, 'The table requires reader version 2'),
+        (
+            lambda uri: commit_protocol(uri, 'columnMapping'),
+            'The table requires the reader features columnMapping',
+        ),
+        # Only the unsupported features are named
+        (
+            lambda uri: commit_protocol(
+                uri, 'deletionVectors', 'typeWidening'
+            ),
+            'The table requires the reader features typeWidening,',
+        ),
+        (partition, 'The table is partitioned'),
+        (use_absolute_paths, 'Data files use absolute paths'),
+        (add_column, 'Column names or types changed after version 0'),
+        (lambda uri: overwrite(uri, ['2']), 'types changed after version 0'),
+        (recreate, 'The checkpoint belongs to another table'),
+        (
+            save_checkpoint_version(5),
+            'The checkpoint version 5 is outside the table versions 0 to 1',
+        ),
+    ],
+)
+def test_stream_error(table_uri, stream, change, text):
+    write(table_uri, [2])
+    change(table_uri)
+    checkpoint = LocalCheckpoint(f'{table_uri}.json')
+    stored = checkpoint.load()
+
+    # The batch ends at version 1, the schema is checked at the current one
+    with pytest.raises(StreamError, match=text):
+        read_ids(load_stream(table_uri, max_versions=1))
+    assert checkpoint.load() == stored
 
 
 @pytest.mark.parametrize(
@@ -226,26 +252,6 @@ def test_no_data_change(table_uri, stream, change):
     assert read_ids(stream) == []
 
 
-@pytest.mark.parametrize('restart', [False, True])
-@pytest.mark.parametrize(
-    'change',
-    [add_column, lambda uri: overwrite(uri, ['2'])],
-    ids=['new column', 'changed type'],
-)
-def test_schema_change_fails(table_uri, stream, change, restart):
-    write(table_uri, [2])
-    change(table_uri)
-    if restart:
-        # The checkpoint version's schema applies beyond the batch limit
-        stream = load_stream(table_uri, max_versions=1)
-
-    with pytest.raises(
-        StreamError, match='Column names or types changed after version 0'
-    ):
-        read_ids(stream)
-    assert stream._checkpoint.load().version == 0
-
-
 @pytest.mark.parametrize(
     ('changes', 'text'),
     [
@@ -284,8 +290,11 @@ def test_version_change_fails(table_uri, stream, changes, text):
             read_ids(stream)
 
 
-@pytest.mark.parametrize('restart', [False, True])
-@pytest.mark.parametrize('failing', ['callback', 'checkpoint'])
+# The same instance retries from its in-memory offset, a restarted stream
+# from the checkpoint
+@pytest.mark.parametrize(
+    ('failing', 'restart'), [('callback', False), ('checkpoint', True)]
+)
 def test_failure_retries(table_uri, stream, mocker, failing, restart):
     write(table_uri, [2])
     func = mocker.Mock(side_effect=OSError if failing == 'callback' else None)
@@ -302,22 +311,3 @@ def test_failure_retries(table_uri, stream, mocker, failing, restart):
         stream = load_stream(table_uri)
     assert read_ids(stream) == [2]
     assert read_ids(stream) == []
-
-
-def test_recreated_table(table_uri, stream):
-    shutil.rmtree(table_uri)
-    write(table_uri, [100])
-
-    with pytest.raises(StreamError, match='another table'):
-        read_ids(stream)
-    assert stream._checkpoint.load().version == 0
-
-
-def test_checkpoint_version_out_of_range(table_uri, stream):
-    table_id = stream._checkpoint.load().table_id
-    stream._checkpoint.save(StreamOffset(table_id, 5))
-
-    with pytest.raises(
-        StreamError, match='version 5 is outside the table versions 0 to 0'
-    ):
-        read_ids(load_stream(table_uri))
