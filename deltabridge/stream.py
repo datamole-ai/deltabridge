@@ -171,8 +171,9 @@ class DeltaTableStream:
             include_file_paths='commit',
         )
         add = pl.col('add').struct
-        metadata = pl.col('metaData').struct
         commits = actions.select(
+            'metaData',
+            'protocol',
             version=pl.col('commit').str.extract(r'(\d{20})\.json$').cast(int),
             path=add.field('path'),
             size=add.field('size'),
@@ -182,10 +183,6 @@ class DeltaTableStream:
                 add.field('dataChange')
                 & add.field('deletionVector').is_not_null(),
             ),
-            schema_string=metadata.field('schemaString'),
-            partitions=metadata.field('partitionColumns'),
-            reader=pl.col('protocol').struct.field('minReaderVersion'),
-            features=pl.col('protocol').struct.field('readerFeatures'),
         ).collect()
         # Why the stream cannot deliver a version, per version
         changes = {
@@ -194,20 +191,19 @@ class DeltaTableStream:
         }
         # Metadata and protocol actions are rare; check them in Python.
         metadata_commits = commits.filter(
-            pl.col('schema_string').is_not_null()
-            | pl.col('reader').is_not_null()
+            pl.col('metaData').is_not_null() | pl.col('protocol').is_not_null()
         )
         for row in metadata_commits.iter_rows(named=True):
-            schema_string = row['schema_string']
-            reader = row['reader'] is not None and _unsupported_reader(
-                row['reader'], row['features']
+            metadata, protocol = row['metaData'], row['protocol']
+            reader = protocol and _unsupported_reader(
+                protocol['minReaderVersion'], protocol['readerFeatures']
             )
-            if row['partitions']:
+            if metadata and metadata['partitionColumns']:
                 change = (
                     'makes the table partitioned, which streams do not support'
                 )
-            elif schema_string is not None and (
-                _column_types(Schema.from_json(schema_string))
+            elif metadata and (
+                _column_types(Schema.from_json(metadata['schemaString']))
                 != self._column_types
             ):
                 change = 'changes column names or types'
