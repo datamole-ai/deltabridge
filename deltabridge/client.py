@@ -6,7 +6,10 @@ from typing import Any, Callable
 import polars as pl
 from deltalake import DeltaTable
 from deltalake.exceptions import DeltaProtocolError
-from pyarrow.dataset import ParquetReadOptions
+
+from deltabridge.base_checkpoint import BaseCheckpoint
+from deltabridge.parquet import PARQUET_READ_OPTIONS
+from deltabridge.stream import DeltaTableStream
 
 
 class PartitionFilterOperator(StrEnum):
@@ -129,11 +132,43 @@ class DeltaTableClient:
         else:
             # No partition filter for non-partitioned tables
             pyarrow_options = {}
-        # Spark writes INT96 timestamps, which overflow ns outside 1677-2262
-        pyarrow_options['parquet_read_options'] = ParquetReadOptions(
-            coerce_int96_timestamp_unit='us'
-        )
+        pyarrow_options['parquet_read_options'] = PARQUET_READ_OPTIONS
 
         return pl.scan_delta(
             source=table, use_pyarrow=True, pyarrow_options=pyarrow_options
+        )
+
+    def load_as_stream(
+        self,
+        checkpoint: BaseCheckpoint,
+        max_versions: int | None = None,
+    ) -> DeltaTableStream:
+        """Load the rows added to a Delta table as a stream.
+
+        A new stream starts at the current table version and skips the rows
+        already in the table.
+
+        Parameters
+        ----------
+        checkpoint
+            Checkpoint which stores the offset of the stream.
+        max_versions
+            Positive maximum number of table versions per batch.
+            If not provided, all new versions are read.
+
+        Returns
+        -------
+        DeltaTableStream
+            A stream whose `process_batch` method the application schedules.
+
+        Raises
+        ------
+        ValueError
+            If `max_versions` is not positive.
+        """
+        return DeltaTableStream(
+            self._table_uri,
+            self._storage_options_fn,
+            checkpoint,
+            max_versions,
         )
