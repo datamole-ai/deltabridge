@@ -102,45 +102,46 @@ class DeltaTableStream:
         options = self._storage_options_fn()
         # Cached incremental replay can miss a table recreated at the same URI.
         table = DeltaTable(self._table_uri, storage_options=options)
-        if self._offset is None:
-            # A new stream skips the rows already in the table.
-            _check_supported(table)
-            sizes, end = {}, table.version()
-        else:
-            sizes, end = self._read_resume(table, options, self._offset)
+        offset, end = self._offset, table.version()
+        if offset is not None:
+            if offset.table_id != table.metadata().id:
+                raise ValueError('The checkpoint belongs to another table.')
+            if not 0 <= offset.version <= end:
+                raise ValueError('The checkpoint version is out of range.')
+        protocol = table.protocol()
+        if table.metadata().partition_columns or not _supported_reader(
+            protocol.min_reader_version, protocol.reader_features
+        ):
+            raise NotImplementedError(
+                'Streams require an unpartitioned table with reader version '
+                '1, or reader version 3 with only the reader features '
+                f'{", ".join(sorted(_SUPPORTED_READER_FEATURES))}.'
+            )
+        # A new stream skips the rows already in the table.
+        sizes = {}
+        if offset is not None and offset.version < end:
+            if self._column_types is None:
+                previous = DeltaTable(
+                    self._table_uri,
+                    version=offset.version,
+                    storage_options=options,
+                )
+                self._column_types = _column_types(previous.schema())
+            if self._column_types != _column_types(table.schema()):
+                raise ValueError(
+                    'The table schema changed since the last batch.'
+                )
+            if self._max_versions is not None:
+                end = min(end, offset.version + self._max_versions)
+            sizes, end = self._read_versions(
+                table.table_uri, options, offset.version, end
+            )
         next_offset = StreamOffset(table.metadata().id, end)
         schema = pa.schema(table.schema().to_arrow())
         if not sizes:
             return pl.from_arrow(schema.empty_table()).lazy(), next_offset
         rows = _scan_files(table.table_uri, options, sizes, schema)
         return rows, next_offset
-
-    def _read_resume(
-        self, table: DeltaTable, options: dict[str, str], offset: StreamOffset
-    ) -> tuple[dict[str, int], int]:
-        """File sizes and end version of a batch after the stored offset."""
-        if offset.table_id != table.metadata().id:
-            raise ValueError('The checkpoint belongs to another table.')
-        end = table.version()
-        if not 0 <= offset.version <= end:
-            raise ValueError('The checkpoint version is out of range.')
-        _check_supported(table)
-        if self._column_types is None:
-            previous = DeltaTable(
-                self._table_uri,
-                version=offset.version,
-                storage_options=options,
-            )
-            self._column_types = _column_types(previous.schema())
-        if self._column_types != _column_types(table.schema()):
-            raise ValueError('The table schema changed since the last batch.')
-        if offset.version == end:
-            return {}, end
-        if self._max_versions is not None:
-            end = min(end, offset.version + self._max_versions)
-        return self._read_versions(
-            table.table_uri, options, offset.version, end
-        )
 
     def _read_versions(
         self, table_uri: str, options: dict[str, str], after: int, end: int
@@ -222,19 +223,6 @@ def _supported_reader(
         min_reader_version == 3
         and set(reader_features or []) <= _SUPPORTED_READER_FEATURES
     )
-
-
-def _check_supported(table: DeltaTable) -> None:
-    """Raise if the stream cannot read the table's layout or protocol."""
-    protocol = table.protocol()
-    if table.metadata().partition_columns or not _supported_reader(
-        protocol.min_reader_version, protocol.reader_features
-    ):
-        raise NotImplementedError(
-            'Streams require an unpartitioned table with reader version '
-            '1, or reader version 3 with only the reader features '
-            f'{", ".join(sorted(_SUPPORTED_READER_FEATURES))}.'
-        )
 
 
 def _column_types(schema: Schema) -> pl.Schema:
