@@ -10,8 +10,10 @@ from deltalake import DeltaTable, Field, TableFeatures
 from deltalake.writer import write_deltalake
 from polars.testing import assert_frame_equal
 
+from deltabridge.base_checkpoint import StreamOffset
 from deltabridge.client import DeltaTableClient
 from deltabridge.local.checkpoint import LocalCheckpoint
+from deltabridge.stream import StreamError
 
 
 @pytest.fixture
@@ -150,15 +152,23 @@ def test_timestamps(table_uri, tz):
 
 
 @pytest.mark.parametrize(
-    'features',
-    [[], ['columnMapping'], ['deletionVectors', 'typeWidening']],
+    ('features', 'text'),
+    [
+        ([], 'requires reader version 2'),
+        (['columnMapping'], 'requires the reader features columnMapping'),
+        # Only the unsupported features are named
+        (
+            ['deletionVectors', 'typeWidening'],
+            'requires the reader features typeWidening,',
+        ),
+    ],
     ids=['reader version 2', 'columnMapping', 'typeWidening'],
 )
-def test_unsupported_reader_feature_fails(table_uri, features):
+def test_unsupported_reader_feature_fails(table_uri, features, text):
     write(table_uri, [1])
     commit_protocol(table_uri, *features)
 
-    with pytest.raises(NotImplementedError, match='reader version'):
+    with pytest.raises(StreamError, match=f'The table {text}'):
         read_ids(load_stream(table_uri))
 
 
@@ -170,7 +180,7 @@ def test_absolute_path_fails(table_uri, stream):
         lambda add: add.update(path=f'file://{table_uri}/{add["path"]}'),
     )
 
-    with pytest.raises(NotImplementedError, match='relative'):
+    with pytest.raises(StreamError, match='absolute paths'):
         read_ids(stream)
 
 
@@ -229,28 +239,27 @@ def test_schema_change_fails(table_uri, stream, change, restart):
         # The checkpoint version's schema applies beyond the batch limit
         stream = load_stream(table_uri, max_versions=1)
 
-    with pytest.raises(ValueError, match='schema changed'):
+    with pytest.raises(
+        StreamError, match='Column names or types changed after version 0'
+    ):
         read_ids(stream)
     assert stream._checkpoint.load().version == 0
 
 
 @pytest.mark.parametrize(
-    ('changes', 'error', 'text'),
+    ('changes', 'text'),
     [
         (
             [lambda uri: DeltaTable(uri).delete('id = 1')],
-            ValueError,
             'deletes or updates rows',
         ),
         # The current table is supported again
         (
             [add_column, lambda uri: overwrite(uri, [3])],
-            ValueError,
             'changes column names or types',
         ),
         (
             [partition, lambda uri: overwrite(uri, [3])],
-            NotImplementedError,
             'makes the table partitioned',
         ),
         (
@@ -258,13 +267,12 @@ def test_schema_change_fails(table_uri, stream, change, restart):
                 lambda uri: commit_protocol(uri, 'typeWidening'),
                 lambda uri: commit_protocol(uri, 'deletionVectors'),
             ],
-            NotImplementedError,
-            'requires an unsupported reader protocol',
+            'requires the reader features typeWidening',
         ),
     ],
     ids=['delete', 'schema', 'partition', 'protocol'],
 )
-def test_version_change_fails(table_uri, stream, changes, error, text):
+def test_version_change_fails(table_uri, stream, changes, text):
     write(table_uri, [2])
     for change in changes:
         change(table_uri)
@@ -272,7 +280,7 @@ def test_version_change_fails(table_uri, stream, changes, error, text):
     # The versions before the change are delivered first
     assert read_ids(stream) == [2]
     for _ in range(2):
-        with pytest.raises(error, match=f'Version 2 {text}'):
+        with pytest.raises(StreamError, match=f'Version 2 {text}'):
             read_ids(stream)
 
 
@@ -300,6 +308,16 @@ def test_recreated_table(table_uri, stream):
     shutil.rmtree(table_uri)
     write(table_uri, [100])
 
-    with pytest.raises(ValueError, match='another table'):
+    with pytest.raises(StreamError, match='another table'):
         read_ids(stream)
     assert stream._checkpoint.load().version == 0
+
+
+def test_checkpoint_version_out_of_range(table_uri, stream):
+    table_id = stream._checkpoint.load().table_id
+    stream._checkpoint.save(StreamOffset(table_id, 5))
+
+    with pytest.raises(
+        StreamError, match='version 5 is outside the table versions 0 to 0'
+    ):
+        read_ids(load_stream(table_uri))
