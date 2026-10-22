@@ -77,6 +77,7 @@ table_client = databricks_client.get_table_client('catalog.schema.table')
 
 * External data access must be enabled on the metastore.
 * The reading identity needs the `EXTERNAL USE SCHEMA` privilege on the table's schema.
+* When the table client refreshes the vended credentials, about once an hour, loads and `process_batch()` raise `ValueError` if the name now refers to another table, e.g. after `DROP TABLE` and `CREATE TABLE`, or `HttpResponseError` if no table has the name. Get a new table client then.
 * Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
 
 Databricks tables can also be read with storage access:
