@@ -25,6 +25,7 @@ class AzureCheckpoint(BaseCheckpoint):
         `abfss://<container>@<account>.dfs.core.windows.net/<path>`.
     credential
         Azure credential which is used to access the blob.
+        It must be allowed to write the blob.
     """
 
     def __init__(

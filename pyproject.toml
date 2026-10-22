@@ -3,7 +3,7 @@ name = "deltabridge"
 version = "0"  # Do not change - managed by CI
 license = "MIT"
 license-files = ["LICENSE"]
-description = "Thin Python wrapper for reading Delta tables from Azure Blob Storage with low and stable latency."
+description = "Thin Python wrapper for reading Delta tables from Azure Blob Storage or AWS S3 with low and stable latency."
 authors = [
     {name = "Juraj Pall", email = "juraj.pall@datamole.ai"},
     {name = "Michal Belak", email = "michal.belak@datamole.ai"},
@@ -11,8 +11,6 @@ authors = [
 ]
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "azure-identity>=1.17.1",
-    "azure-storage-blob>=12.31.0",
     # Explicit floor (also pulled in by polars[deltalake], unpinned):
     # deltalake 1.5.0 replayed the whole transaction log in
     # update_incremental (delta-io/delta-rs#4276); the 1.5.1 fix
@@ -32,6 +30,8 @@ keywords = [
     "polars",
     "azure",
     "blob-storage",
+    "aws",
+    "s3",
     "data-engineering",
 ]
 classifiers = [
@@ -51,9 +51,15 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/datamole-ai/deltabridge"
 
+[project.optional-dependencies]
+aws = ["boto3>=1.34.0"]
+azure = ["azure-identity>=1.17.1", "azure-storage-blob>=12.31.0"]
+
 
 [dependency-groups]
 dev = [
+    # Both provider extras, so that their clients are tested
+    "deltabridge[aws,azure]",
     "pytest~=9.0",
     "pytest-mock~=3.8",
     "ruff~=0.16",

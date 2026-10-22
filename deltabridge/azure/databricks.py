@@ -17,7 +17,7 @@ class AzureDatabricksDeltaClient:
     """Databricks client reads Unity Catalog tables with vended credentials.
 
     Vended credentials are read-only, so stream checkpoints are stored with
-    `AzureDeltaClient` or `LocalDeltaClient`.
+    `AzureCheckpoint` or `LocalCheckpoint`.
 
     Parameters
     ----------

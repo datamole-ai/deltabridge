@@ -50,19 +50,15 @@ def test_token_client_token_expired():
         }, 'Token should be refreshed'
 
 
-def test_token_client_get_checkpoint(mocker):
+def test_azure_checkpoint_parses_uri(mocker):
     blob_client = mocker.patch('deltabridge.azure.checkpoint.BlobClient')
     mock_credential = Mock(spec=TokenCredential)
-    mock_credential.get_token.return_value = AccessToken(
-        token='test-token',
-        expires_on=int((datetime.now() + timedelta(hours=1)).timestamp()),
+
+    AzureCheckpoint(
+        'abfss://container@account.dfs.core.windows.net/dir/checkpoint.json',
+        mock_credential,
     )
 
-    checkpoint = AzureDeltaClient(credential=mock_credential).get_checkpoint(
-        'abfss://container@account.dfs.core.windows.net/dir/checkpoint.json'
-    )
-
-    assert isinstance(checkpoint, AzureCheckpoint)
     blob_client.assert_called_once_with(
         account_url='https://account.blob.core.windows.net',
         container_name='container',
