@@ -120,17 +120,15 @@ one pod, and each batch must fit in its memory. If a batch does not fit or you
 need more throughput, use Spark Structured Streaming.
 
 A checkpoint stores the last read version, the offset of the stream. 
-`LocalDeltaClient.get_checkpoint()` stores it in a local file:
+`LocalCheckpoint` stores it in a local file:
 
 ```python
 import polars as pl
 
-from deltabridge.local import LocalDeltaClient
 from deltabridge.local.checkpoint import LocalCheckpoint
 from deltabridge.stream import DeltaTableStream
 
-local_delta_client: LocalDeltaClient = LocalDeltaClient()
-checkpoint: LocalCheckpoint = local_delta_client.get_checkpoint(
+checkpoint = LocalCheckpoint(
     '/data/my_checkpoint.json'  # on a persistent volume
 )
 stream: DeltaTableStream = table_client.load_as_stream(
