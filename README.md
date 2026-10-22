@@ -174,7 +174,7 @@ def poll_once() -> None:
 * Delivery is at-least-once: the offset advances only after the function returns and the checkpoint is saved. If a call raises, retry it; processing must tolerate duplicates.
 * A new stream skips the rows already in the table.
 * OPTIMIZE and metadata changes that keep column names and types are skipped. Updates and deletes raise `StreamError` once the versions before them are delivered; changes of column names or types raise it right away. Retrying does not help; start a new stream with a new checkpoint.
-* Requires an unpartitioned table with no reader features other than deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`, and data files at relative paths. Other tables raise `StreamError` too.
+* Requires an unpartitioned table with data files at relative paths and only the reader features that [Supported Delta features](#supported-delta-features) marks as supported. Other tables raise `StreamError` too.
 * Columns missing from a data file are read as nulls, and columns outside the Delta schema are ignored.
 * `max_versions` limits the commits per batch, not rows or memory.
 * Keep the checkpoint on a persistent volume and run one stream per checkpoint. Pods sharing a checkpoint, e.g. during a rolling update, deliver some batches twice; the `Recreate` strategy avoids it.
@@ -190,6 +190,7 @@ def poll_once() -> None:
 | [Column mapping](https://learn.microsoft.com/en-us/azure/databricks/tables/features/column-mapping) | ❌ | ✅ | ❌² | ❌ |
 | [Checkpoint V2](https://learn.microsoft.com/en-us/azure/databricks/tables/features/checkpoint-v2) | ❌ | ✅ | ❌ | ✅ |
 | [`TIMESTAMP_NTZ`](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/data-types/timestamp-ntz-type) | ✅ | ✅ | ✅ | ✅ |
+| [`vacuumProtocolCheck`](https://github.com/delta-io/delta/blob/master/PROTOCOL.md#vacuum-protocol-check) | ❌ | ❌ | ❌ | ✅ |
 | [Type widening](https://learn.microsoft.com/en-us/azure/databricks/tables/features/type-widening) | ❌ | ❌ | ❌ | ❌ |
 | [Catalog commits](https://learn.microsoft.com/en-us/azure/databricks/tables/features/catalog-commits) | ❌ | ❌ | ❌ | ❌ |
 
