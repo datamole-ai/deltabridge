@@ -42,6 +42,14 @@ _SUPPORTED_READER_FEATURES = {
 }
 
 
+class StreamError(Exception):
+    """The stream cannot continue from its checkpoint.
+
+    Retrying does not help. Start a new stream with a new checkpoint, after
+    changing the table if it is not supported.
+    """
+
+
 class DeltaTableStream:
     """Stream of appended rows, created by `DeltaTableClient.load_as_stream`.
 
@@ -78,22 +86,19 @@ class DeltaTableStream:
 
         Raises
         ------
-        ValueError
-            If the checkpoint belongs to another table or its version is out
-            of range, or if a version after the checkpoint deletes or
-            updates rows or changes column names or types.
-        NotImplementedError
-            If the current table or a version after the checkpoint is
-            partitioned or requires an unsupported reader protocol, or if
-            data files are referenced by absolute paths.
+        StreamError
+            If the stream cannot continue from its checkpoint: the
+            checkpoint belongs to another table, or a version after it
+            deletes or updates rows, changes columns or partitioning, or
+            the table is not supported. Retrying does not help.
 
         Notes
         -----
         A call made while another call on the same stream runs returns at
         once without reading; a later call reads the new rows. Delivery is
-        at-least-once. If reading, processing or saving fails, the in-memory
-        offset stays unchanged so the call can be retried. Missing logs or
-        files also fail the read.
+        at-least-once. Other errors, e.g. from storage, the function or
+        saving the checkpoint, leave the offset unchanged, so the call can be
+        retried. Missing logs or files also fail the read.
         """
         # Waiting calls would pile up while batches outlast the schedule
         if not self._lock.acquire(blocking=False):
@@ -114,45 +119,53 @@ class DeltaTableStream:
         options = self._storage_options_fn()
         # Cached incremental replay can miss a table recreated at the same URI.
         table = DeltaTable(self._table_uri, storage_options=options)
-        if self._offset is None:
-            # A new stream skips the rows already in the table.
-            _check_supported(table)
-            sizes, end = {}, table.version()
-        else:
-            sizes, end = self._read_resume(table, options, self._offset)
+        offset, end = self._offset, table.version()
+        if offset is not None:
+            if offset.table_id != table.metadata().id:
+                raise StreamError('The checkpoint belongs to another table.')
+            if not 0 <= offset.version <= end:
+                raise StreamError(
+                    f'The checkpoint version {offset.version} is outside '
+                    f'the table versions 0 to {end}.'
+                )
+        if table.metadata().partition_columns:
+            raise StreamError(
+                'The table is partitioned, which streams do not support.'
+            )
+        protocol = table.protocol()
+        reader = _unsupported_reader(
+            protocol.min_reader_version, protocol.reader_features
+        )
+        if reader:
+            raise StreamError(
+                f'The table {reader}, which streams do not support.'
+            )
+        # A new stream skips the rows already in the table.
+        sizes = {}
+        if offset is not None and offset.version < end:
+            if self._column_types is None:
+                previous = DeltaTable(
+                    self._table_uri,
+                    version=offset.version,
+                    storage_options=options,
+                )
+                self._column_types = _column_types(previous.schema())
+            if self._column_types != _column_types(table.schema()):
+                raise StreamError(
+                    'Column names or types changed after version '
+                    f'{offset.version}.'
+                )
+            if self._max_versions is not None:
+                end = min(end, offset.version + self._max_versions)
+            sizes, end = self._read_versions(
+                table.table_uri, options, offset.version, end
+            )
         next_offset = StreamOffset(table.metadata().id, end)
         schema = pa.schema(table.schema().to_arrow())
         if not sizes:
             return pl.from_arrow(schema.empty_table()).lazy(), next_offset
         rows = _scan_files(table.table_uri, options, sizes, schema)
         return rows, next_offset
-
-    def _read_resume(
-        self, table: DeltaTable, options: dict[str, str], offset: StreamOffset
-    ) -> tuple[dict[str, int], int]:
-        """File sizes and end version of a batch after the stored offset."""
-        if offset.table_id != table.metadata().id:
-            raise ValueError('The checkpoint belongs to another table.')
-        end = table.version()
-        if not 0 <= offset.version <= end:
-            raise ValueError('The checkpoint version is out of range.')
-        _check_supported(table)
-        if self._column_types is None:
-            previous = DeltaTable(
-                self._table_uri,
-                version=offset.version,
-                storage_options=options,
-            )
-            self._column_types = _column_types(previous.schema())
-        if self._column_types != _column_types(table.schema()):
-            raise ValueError('The table schema changed since the last batch.')
-        if offset.version == end:
-            return {}, end
-        if self._max_versions is not None:
-            end = min(end, offset.version + self._max_versions)
-        return self._read_versions(
-            table.table_uri, options, offset.version, end
-        )
 
     def _read_versions(
         self, table_uri: str, options: dict[str, str], after: int, end: int
@@ -186,9 +199,9 @@ class DeltaTableStream:
             reader=pl.col('protocol').struct.field('minReaderVersion'),
             features=pl.col('protocol').struct.field('readerFeatures'),
         ).collect()
-        # Exception class and text per version the stream cannot deliver
+        # Why the stream cannot deliver a version, per version
         changes = {
-            version: (ValueError, 'deletes or updates rows')
+            version: 'deletes or updates rows'
             for version in commits.filter('deleted')['version']
         }
         # Metadata and protocol actions are rare; check them in Python.
@@ -198,55 +211,45 @@ class DeltaTableStream:
         )
         for row in metadata_commits.iter_rows(named=True):
             schema_string = row['schema_string']
+            reader = row['reader'] is not None and _unsupported_reader(
+                row['reader'], row['features']
+            )
             if row['partitions']:
-                change = NotImplementedError, 'makes the table partitioned'
+                change = (
+                    'makes the table partitioned, which streams do not support'
+                )
             elif schema_string is not None and (
                 _column_types(Schema.from_json(schema_string))
                 != self._column_types
             ):
-                change = ValueError, 'changes column names or types'
-            elif row['reader'] is not None and not _supported_reader(
-                row['reader'], row['features']
-            ):
-                change = (
-                    NotImplementedError,
-                    'requires an unsupported reader protocol',
-                )
+                change = 'changes column names or types'
+            elif reader:
+                change = f'{reader}, which streams do not support'
             else:
                 continue
             changes[row['version']] = change
         if changes:
             changed = min(changes)
             if changed == after + 1:
-                error, text = changes[changed]
-                raise error(f'Version {changed} {text}.')
+                raise StreamError(f'Version {changed} {changes[changed]}.')
             # Deliver earlier versions first; the next call raises.
             end = changed - 1
         added = commits.filter('added', pl.col('version') <= end)
         return dict(zip(added['path'], added['size'])), end
 
 
-def _supported_reader(
+def _unsupported_reader(
     min_reader_version: int, reader_features: list[str] | None
-) -> bool:
-    """Whether the stream can read a table with this reader protocol."""
-    return min_reader_version == 1 or (
-        min_reader_version == 3
-        and set(reader_features or []) <= _SUPPORTED_READER_FEATURES
-    )
-
-
-def _check_supported(table: DeltaTable) -> None:
-    """Raise if the stream cannot read the table's layout or protocol."""
-    protocol = table.protocol()
-    if table.metadata().partition_columns or not _supported_reader(
-        protocol.min_reader_version, protocol.reader_features
-    ):
-        raise NotImplementedError(
-            'Streams require an unpartitioned table with reader version '
-            '1, or reader version 3 with only the reader features '
-            f'{", ".join(sorted(_SUPPORTED_READER_FEATURES))}.'
-        )
+) -> str | None:
+    """What a reader protocol requires that streams do not support."""
+    if min_reader_version == 1:
+        return None
+    if min_reader_version != 3:
+        return f'requires reader version {min_reader_version}'
+    unsupported = set(reader_features or []) - _SUPPORTED_READER_FEATURES
+    if not unsupported:
+        return None
+    return f'requires the reader features {", ".join(sorted(unsupported))}'
 
 
 def _column_types(schema: Schema) -> pl.Schema:
@@ -264,20 +267,16 @@ def _scan_files(
     known_sizes = {}
     for path, size in sizes.items():
         if urlsplit(path).scheme or path.startswith('/'):
-            raise NotImplementedError(
-                'Streams require data file paths relative to the table.'
+            raise StreamError(
+                'Data files use absolute paths, e.g. in shallow clones, '
+                'which streams do not support.'
             )
         known_sizes[unquote(path)] = size
     # Known sizes spare a HEAD request per file, which holds the GIL.
     fs = pa_fs.PyFileSystem(
         DeltaStorageHandler(table_uri, options, known_sizes)
     )
-    fmt = ds.ParquetFileFormat(
-        read_options=PARQUET_READ_OPTIONS,
-        default_fragment_scan_options=ds.ParquetFragmentScanOptions(
-            pre_buffer=True
-        ),
-    )
+    fmt = ds.ParquetFileFormat(read_options=PARQUET_READ_OPTIONS)
     fragments = [
         fmt.make_fragment(path, filesystem=fs) for path in known_sizes
     ]

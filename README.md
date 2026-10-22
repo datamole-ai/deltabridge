@@ -139,9 +139,10 @@ table_df = table_client.load_as_polars(
 
 ### Streaming reads
 `load_as_stream()` reads the rows added by new table versions, like a Spark 
-structured streaming read of a Delta table. It is meant for one process in 
-one pod, and each batch must fit in its memory. If a batch does not fit or you 
-need more throughput, use Spark Structured Streaming.
+structured streaming read of a Delta table. It finds the added files in the 
+Delta log, so the change data feed is not needed. It is meant for one 
+process in one pod, and each batch must fit in its memory. If a batch does 
+not fit or you need more throughput, use Spark Structured Streaming.
 
 A checkpoint stores the last read version, the offset of the stream. 
 `LocalCheckpoint` stores it in a local file:
@@ -173,12 +174,10 @@ def poll_once() -> None:
 * Batches never overlap, inspired by Spark Structured Streaming, which runs one micro-batch at a time. A call made while another call on the same stream is still running, e.g. when a batch takes longer than the scheduler's interval, returns `None` at once without reading, so calls do not pile up. The next call reads the rows the skipped call would have read.
 * The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
 * A new stream starts at the current table version and skips the rows already in the table.
-* Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or supported protocol features. Updates, deletes and changes of column names or types raise `ValueError`; partitioning and unsupported reader features raise `NotImplementedError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
+* Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or supported protocol features. Updates, deletes and changes of column names or types raise `StreamError`, which retrying does not fix; start a new stream with a new checkpoint. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
+* Requires an unpartitioned table with reader version 1, or reader version 3 with only the reader features deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`. Partitioning, other reader features, e.g. column mapping or type widening, and data files referenced by absolute paths, e.g. by shallow clones, raise `StreamError` too.
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
-* The change data feed is not needed: the stream reads the files added by each version from the Delta log.
-* Requires unpartitioned tables with reader version 1, or reader version 3 with only the reader features deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`. Column mapping, type widening, other reader features, schema evolution, and data files referenced by absolute paths, e.g. by shallow clones, are not supported.
 * Files are read using the Delta schema. Columns missing from a file are read as nulls; other columns, e.g. internal row tracking columns, are ignored. INT96 timestamps, which Spark and Databricks write, are read in microseconds, so dates outside 1677-2262 stay correct.
-* Each call loads fresh current metadata to detect table recreation. Resuming also loads the checkpoint version's schema once. Idle polls do not scan data files or run the additional commit-reading loop. Metadata refresh does not reuse the batch client's cached snapshot.
 * `max_versions` must be positive; it limits commits, not rows or memory.
 * Run one stream instance per checkpoint. Instances sharing a checkpoint, e.g. pods during a rolling update, deliver some batches twice; the `Recreate` strategy avoids it. Keep the checkpoint on a persistent volume, so a new pod resumes from it.
 
