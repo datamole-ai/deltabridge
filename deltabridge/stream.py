@@ -248,12 +248,7 @@ def _scan_files(
     fs = pa_fs.PyFileSystem(
         DeltaStorageHandler(table_uri, options, known_sizes)
     )
-    fmt = ds.ParquetFileFormat(
-        read_options=PARQUET_READ_OPTIONS,
-        default_fragment_scan_options=ds.ParquetFragmentScanOptions(
-            pre_buffer=True
-        ),
-    )
+    fmt = ds.ParquetFileFormat(read_options=PARQUET_READ_OPTIONS)
     fragments = [
         fmt.make_fragment(path, filesystem=fs) for path in known_sizes
     ]
