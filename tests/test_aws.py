@@ -48,7 +48,7 @@ def test_aws_client_no_region(monkeypatch):
         )
 
 
-def test_aws_client_credentials_expired():
+def test_aws_client_refreshes_expired_credentials_once():
     refresh = Mock(
         side_effect=[
             {
