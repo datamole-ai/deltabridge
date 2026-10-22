@@ -1,6 +1,7 @@
 # deltabridge
 Thin Python wrapper for reading Delta tables from object storage (currently 
-Azure Blob Storage) or a local filesystem, with low and stable latency. 
+Azure Blob Storage and AWS S3) or a local filesystem, with low and stable 
+latency. 
 Optimized for repeated reads from long-running Python services.
 A typical use case is exposing the final products of a data pipeline 
 via a REST API, where request latency should stay predictable.
@@ -9,15 +10,19 @@ via a REST API, where request latency should stay predictable.
  > and automatic incremental caching of Delta transaction logs.
 
 ## Installation
+Install the extra for your object storage provider, or both. The local 
+filesystem needs no extra.
 
 ```bash
-pip install deltabridge
+pip install 'deltabridge[azure]'      # Azure Blob Storage
+pip install 'deltabridge[aws]'        # AWS S3
+pip install 'deltabridge[azure,aws]'  # both
 ```
 
 Or, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add deltabridge
+uv add 'deltabridge[azure]'
 ```
 
 ## Usage
@@ -28,6 +33,8 @@ and [streaming reads](#streaming-reads) use. Reuse the table client across
 reads; each load refreshes the table as needed.
 
 #### Storage access (own credentials)
+Object storage support currently covers Azure Blob Storage and AWS S3, plus 
+the local filesystem. The table is read with your own credentials.
 
 ##### Azure
 
@@ -41,6 +48,25 @@ table_client = azure_delta_client.get_table_client(
     table_uri=os.environ['MY_TABLE_STORAGE_URI'],
 )
 ```
+
+##### AWS
+
+```python
+import os
+
+from deltabridge.aws import AwsDeltaClient
+
+# Credentials and region come from the default boto3 session (environment
+# variables, shared config and credentials files, instance role, ...).
+# Pass your own boto3.Session to use a specific profile or assumed role.
+aws_delta_client = AwsDeltaClient()
+table_client = aws_delta_client.get_table_client(
+    table_uri=os.environ['MY_TABLE_STORAGE_URI'],  # e.g. s3://bucket/path
+)
+```
+
+* Temporary credentials (e.g. of an assumed role) are refreshed by boto3 before they expire. Static credentials, e.g. from the shared credentials file, are read once and never refreshed.
+* The region comes from the boto3 session, or from `AWS_REGION` if the session has none, and must be the region of the bucket.
 
 ##### Local filesystem
 
@@ -80,9 +106,9 @@ table_client = databricks_client.get_table_client('catalog.schema.table')
 * Not supported: views, materialized views, streaming tables, shallow clones, tables shared via Delta Sharing, and tables with row filters or column masks. For Delta table features, see [Supported Delta features](#supported-delta-features).
 
 Databricks tables can also be read with storage access:
-* Use the table's storage location (in Azure Blob Storage) as the table URI.
+* Use the table's storage location (in Azure Blob Storage or AWS S3) as the table URI.
     * You can find it in the Databricks Catalog Explorer UI under *Details* of the table.
-* The reading identity needs at least the *Storage Blob Data Reader* permission on the storage location (storage account/container).
+* The reading identity needs read access to the storage location: at least the *Storage Blob Data Reader* permission on the storage account/container in Azure, or `s3:GetObject` and `s3:ListBucket` on the location in AWS.
 * Row filters and column masks are not applied.
 
 ### Batch reads
@@ -203,6 +229,5 @@ import deltalake
 deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
 ```
 
-## Cloud provider support
-Object storage support currently covers Azure Blob Storage (plus the local 
-filesystem).
+On AWS S3, delta-rs also needs a locking provider for safe concurrent writes
+(`AWS_S3_LOCKING_PROVIDER=dynamodb`). See [Writing to S3 with a locking provider](https://delta-io.github.io/delta-rs/latest/usage/writing/writing-to-s3-with-locking-provider/).
