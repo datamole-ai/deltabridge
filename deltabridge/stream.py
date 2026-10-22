@@ -57,8 +57,9 @@ class DeltaTableStream:
     """Stream of appended rows, created by `DeltaTableClient.load_as_stream`.
 
     The application schedules `process_batch` calls. Only one stream may use
-    a checkpoint. Overlapping calls on the same stream wait for each other,
-    so batches never run concurrently, as in Spark.
+    a checkpoint. A call made while another call on the same stream runs
+    returns at once, so batches never run concurrently and calls never pile
+    up.
     """
 
     def __init__(
@@ -90,8 +91,8 @@ class DeltaTableStream:
 
         Notes
         -----
-        Overlapping calls on the same stream wait for each other, and each
-        starts from the offset the previous call left. Delivery is
+        A call made while another call on the same stream runs returns at
+        once without reading; a later call reads the new rows. Delivery is
         at-least-once. If reading, processing or saving fails, the in-memory
         offset stays unchanged so the call can be retried.
 
@@ -107,7 +108,10 @@ class DeltaTableStream:
             protocol or references data files by absolute paths, or if a
             stream starting at `EARLIEST` finds deletion vectors.
         """
-        with self._lock:
+        # Waiting calls would pile up while batches outlast the schedule
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
             rows, next_offset = self._read_batch()
             if next_offset == self._offset:
                 return
@@ -116,6 +120,8 @@ class DeltaTableStream:
                 func(batch)
             self._checkpoint.save(next_offset)
             self._offset = next_offset
+        finally:
+            self._lock.release()
 
     def _read_batch(self) -> tuple[pl.LazyFrame, StreamOffset]:
         options = self._storage_options_fn()

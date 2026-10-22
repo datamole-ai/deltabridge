@@ -147,7 +147,8 @@ def poll_once() -> None:
     stream.process_batch(process_batch)
 ```
 
-* `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling; overlapping calls on the same stream wait for each other.
+* `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling.
+* Batches never overlap. A call made while another call on the same stream is still running, e.g. when a batch takes longer than the scheduler's interval, returns `None` at once without reading, so calls do not pile up. The next call reads the rows the skipped call would have read.
 * The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
 * Without a stored offset, `StartingOffset.LATEST` (default) skips the rows already in the table and `StartingOffset.EARLIEST` reads them, as Spark does by default, e.g. `load_as_stream(checkpoint, start=StartingOffset.EARLIEST)`.
 * Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or supported protocol features. Updates, deletes and other schema changes raise `ValueError`. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.

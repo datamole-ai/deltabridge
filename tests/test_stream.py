@@ -301,30 +301,26 @@ def test_recreated_table(table_uri, stream):
     assert stream._checkpoint.load().version == 0
 
 
-def test_overlapping_calls_wait(table_uri, stream):
+def test_overlapping_call_returns(table_uri, stream):
     write(table_uri, [2])
     ids = []
-    blocked, release, called = Event(), Event(), Event()
+    blocked, release = Event(), Event()
 
     def block(df):
         ids.extend(df['id'].to_list())
         blocked.set()
         release.wait(timeout=10)
 
-    def record(df):
-        # The first call saved its offset before this one read the table
-        assert stream._checkpoint.load().version == 1
-        ids.extend(df['id'].to_list())
-        called.set()
-
-    with ThreadPoolExecutor(2) as pool:
-        first = pool.submit(stream.process_batch, block)
+    with ThreadPoolExecutor(1) as pool:
+        running = pool.submit(stream.process_batch, block)
         assert blocked.wait(timeout=10)
         write(table_uri, [3])
-        second = pool.submit(stream.process_batch, record)
-        assert not called.wait(timeout=0.5)
+        # Reading now would deliver row 2 again before the offset is saved
+        assert stream.process_batch(pytest.fail) is None
         release.set()
-        first.result(timeout=10)
-        second.result(timeout=10)
-    assert ids == [2, 3]
+        running.result(timeout=10)
+    assert ids == [2]
+    assert stream._checkpoint.load().version == 1
+    # The next call reads the rows which the overlapping call skipped
+    assert read_ids(stream) == [3]
     assert stream._checkpoint.load().version == 2
