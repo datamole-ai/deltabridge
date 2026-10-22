@@ -34,7 +34,26 @@ def write(table_uri, ids):
 
 def overwrite(table_uri, ids):
     df = pl.DataFrame({'id': ids})
-    write_deltalake(table_uri, df, mode='overwrite', schema_mode='overwrite')
+    # An empty list also removes partition columns, None keeps them
+    write_deltalake(
+        table_uri,
+        df,
+        mode='overwrite',
+        schema_mode='overwrite',
+        partition_by=[],
+    )
+
+
+def partition(table_uri):
+    # Delta tables need a column outside the partition columns
+    df = pl.DataFrame({'id': [3], 'name': ['c']})
+    write_deltalake(
+        table_uri,
+        df,
+        mode='overwrite',
+        schema_mode='overwrite',
+        partition_by=['id'],
+    )
 
 
 def add_column(table_uri):
@@ -240,25 +259,36 @@ def test_schema_change_fails(table_uri, stream, change, restart):
 
 
 @pytest.mark.parametrize(
-    ('changes', 'error'),
+    ('changes', 'error', 'text'),
     [
-        ([lambda uri: DeltaTable(uri).delete('id = 1')], 'deletes or updates'),
-        # The current schema and protocol are supported again
+        (
+            [lambda uri: DeltaTable(uri).delete('id = 1')],
+            ValueError,
+            'deletes or updates rows',
+        ),
+        # The current table is supported again
         (
             [add_column, lambda uri: overwrite(uri, [3])],
-            'changes the schema or partitioning',
+            ValueError,
+            'changes column names or types',
+        ),
+        (
+            [partition, lambda uri: overwrite(uri, [3])],
+            NotImplementedError,
+            'makes the table partitioned',
         ),
         (
             [
                 lambda uri: commit_protocol(uri, 'typeWidening'),
                 lambda uri: commit_protocol(uri, 'deletionVectors'),
             ],
-            'changes the protocol to an unsupported reader',
+            NotImplementedError,
+            'requires an unsupported reader protocol',
         ),
     ],
-    ids=['delete', 'schema', 'protocol'],
+    ids=['delete', 'schema', 'partition', 'protocol'],
 )
-def test_version_change_fails(table_uri, stream, changes, error):
+def test_version_change_fails(table_uri, stream, changes, error, text):
     write(table_uri, [2])
     for change in changes:
         change(table_uri)
@@ -266,7 +296,7 @@ def test_version_change_fails(table_uri, stream, changes, error):
     # The versions before the change are delivered first
     assert read_ids(stream) == [2]
     for _ in range(2):
-        with pytest.raises(ValueError, match=f'Version 2 {error}'):
+        with pytest.raises(error, match=f'Version 2 {text}'):
             read_ids(stream)
 
 

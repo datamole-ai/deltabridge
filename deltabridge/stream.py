@@ -82,22 +82,23 @@ class DeltaTableStream:
         func
             Function called with the rows of a nonempty batch.
 
+        Raises
+        ------
+        ValueError
+            If the checkpoint belongs to another table or its version is out
+            of range, or if a version after the checkpoint deletes or
+            updates rows or changes column names or types.
+        NotImplementedError
+            If the current table or a version after the checkpoint is
+            partitioned or requires an unsupported reader protocol, if data
+            files are referenced by absolute paths, or if a stream starting
+            at `EARLIEST` finds deletion vectors.
+
         Notes
         -----
         Delivery is at-least-once. If reading, processing or saving fails,
         the in-memory offset stays unchanged so the call can be retried.
-
-        Raises
-        ------
-        ValueError
-            If the offset is invalid, or a version deletes or updates rows,
-            changes column names, types or partitioning, or requires an
-            unsupported reader protocol. Missing logs or files also fail
-            the read.
-        NotImplementedError
-            If the table is partitioned, requires an unsupported reader
-            protocol or references data files by absolute paths, or if a
-            stream starting at `EARLIEST` finds deletion vectors.
+        Missing logs or files also fail the read.
         """
         rows, next_offset = self._read_batch()
         if next_offset == self._offset:
@@ -202,8 +203,9 @@ class DeltaTableStream:
             reader=pl.col('protocol').struct.field('minReaderVersion'),
             features=pl.col('protocol').struct.field('readerFeatures'),
         ).collect()
+        # Exception class and text per version the stream cannot deliver
         changes = {
-            version: 'deletes or updates rows'
+            version: (ValueError, 'deletes or updates rows')
             for version in commits.filter('deleted')['version']
         }
         # Metadata and protocol actions are rare; check them in Python.
@@ -213,22 +215,28 @@ class DeltaTableStream:
         )
         for row in metadata_commits.iter_rows(named=True):
             schema_string = row['schema_string']
-            if schema_string is not None and (
-                row['partitions']
-                or _column_types(Schema.from_json(schema_string))
+            if row['partitions']:
+                change = NotImplementedError, 'makes the table partitioned'
+            elif schema_string is not None and (
+                _column_types(Schema.from_json(schema_string))
                 != self._column_types
             ):
-                changes[row['version']] = 'changes the schema or partitioning'
+                change = ValueError, 'changes column names or types'
             elif row['reader'] is not None and not _supported_reader(
                 row['reader'], row['features']
             ):
-                changes[row['version']] = (
-                    'changes the protocol to an unsupported reader version'
+                change = (
+                    NotImplementedError,
+                    'requires an unsupported reader protocol',
                 )
+            else:
+                continue
+            changes[row['version']] = change
         if changes:
             changed = min(changes)
             if changed == after + 1:
-                raise ValueError(f'Version {changed} {changes[changed]}.')
+                error, text = changes[changed]
+                raise error(f'Version {changed} {text}.')
             # Deliver earlier versions first; the next call raises.
             end = changed - 1
         added = commits.filter('added', pl.col('version') <= end)

@@ -161,6 +161,11 @@ class DeltaTableClient:
         -------
         DeltaTableStream
             A stream whose `process_batch` method the application schedules.
+
+        Raises
+        ------
+        ValueError
+            If `max_versions` is not positive.
         """
         return DeltaTableStream(
             self._table_uri,
