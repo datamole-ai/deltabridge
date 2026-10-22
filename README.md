@@ -183,3 +183,6 @@ import deltalake
 
 deltalake.write_deltalake(table_client.load_as_delta(), df, mode='append')
 ```
+
+On AWS S3, delta-rs also needs a locking provider for safe concurrent writes
+(`AWS_S3_LOCKING_PROVIDER=dynamodb`). See [Writing to S3 with a locking provider](https://delta-io.github.io/delta-rs/latest/usage/writing/writing-to-s3-with-locking-provider/).
