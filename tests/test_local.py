@@ -1,10 +1,10 @@
 from deltabridge.base_checkpoint import StreamOffset
-from deltabridge.local import LocalDeltaClient
+from deltabridge.local.checkpoint import LocalCheckpoint
 
 
 def test_local_checkpoint_save_and_load(tmp_path):
     path = tmp_path / 'checkpoint.json'
-    checkpoint = LocalDeltaClient().get_checkpoint(str(path))
+    checkpoint = LocalCheckpoint(str(path))
     offset = StreamOffset('table-id', 42)
 
     assert checkpoint.load() is None

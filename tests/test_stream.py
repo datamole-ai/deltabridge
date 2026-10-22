@@ -14,15 +14,6 @@ from polars.testing import assert_frame_equal
 
 from deltabridge.client import DeltaTableClient
 from deltabridge.local.checkpoint import LocalCheckpoint
-from deltabridge.stream import StartingOffset
-
-# Inline deletion vector of the rows 0 and 1
-DELETION_VECTOR = {
-    'storageType': 'i',
-    'pathOrInlineDv': '^Bg9^0rr910000000000iXQKl0rr91000315c8Xg00031',
-    'sizeInBytes': 36,
-    'cardinality': 2,
-}
 
 
 @pytest.fixture
@@ -36,17 +27,36 @@ def write(table_uri, ids):
 
 def overwrite(table_uri, ids):
     df = pl.DataFrame({'id': ids})
-    write_deltalake(table_uri, df, mode='overwrite', schema_mode='overwrite')
+    # An empty list also removes partition columns, None keeps them
+    write_deltalake(
+        table_uri,
+        df,
+        mode='overwrite',
+        schema_mode='overwrite',
+        partition_by=[],
+    )
+
+
+def partition(table_uri):
+    # Delta tables need a column outside the partition columns
+    df = pl.DataFrame({'id': [3], 'name': ['c']})
+    write_deltalake(
+        table_uri,
+        df,
+        mode='overwrite',
+        schema_mode='overwrite',
+        partition_by=['id'],
+    )
 
 
 def add_column(table_uri):
     DeltaTable(table_uri).alter.add_columns(Field('name', 'string'))
 
 
-def load_stream(table_uri, start=StartingOffset.EARLIEST, max_versions=None):
+def load_stream(table_uri, max_versions=None):
     client = DeltaTableClient(table_uri, storage_options_fn=lambda: {})
     checkpoint = LocalCheckpoint(f'{table_uri}.json')
-    return client.load_as_stream(checkpoint, start, max_versions)
+    return client.load_as_stream(checkpoint, max_versions)
 
 
 def read_ids(stream):
@@ -79,23 +89,19 @@ def commit_protocol(table_uri, *features):
 @pytest.fixture
 def stream(table_uri):
     write(table_uri, [1])
-    stream = load_stream(table_uri, StartingOffset.LATEST)
+    stream = load_stream(table_uri)
     assert read_ids(stream) == []
     return stream
 
 
-@pytest.mark.parametrize(
-    ('start', 'expected'),
-    [(StartingOffset.EARLIEST, [1, 2]), (StartingOffset.LATEST, [])],
-)
-def test_start(table_uri, start, expected):
+def test_start(table_uri):
     write(table_uri, [1])
     # Deletion vectors are enabled, but no file has one
     commit_protocol(table_uri, 'deletionVectors')
     write(table_uri, [2])
-    stream = load_stream(table_uri, start)
+    stream = load_stream(table_uri)
 
-    assert read_ids(stream) == expected
+    assert read_ids(stream) == []
     write(table_uri, [3])
     assert read_ids(stream) == [3]
     assert stream.process_batch(pytest.fail) is None
@@ -105,7 +111,7 @@ def test_max_versions(table_uri):
     write(table_uri, [1])
     with pytest.raises(ValueError, match='positive'):
         load_stream(table_uri, max_versions=0)
-    stream = load_stream(table_uri, StartingOffset.LATEST, max_versions=2)
+    stream = load_stream(table_uri, max_versions=2)
     assert read_ids(stream) == []
     for ids in [[2], [3, 4], [5]]:
         write(table_uri, ids)
@@ -125,7 +131,10 @@ def test_timestamps(table_uri, tz):
     df = pl.DataFrame({'id': [1, 2, 3], 'ts': times})
     df = df.with_columns(pl.col('ts').dt.replace_time_zone(tz))
     # Naive datetimes create a TIMESTAMP_NTZ column
-    write_deltalake(table_uri, df)
+    write_deltalake(table_uri, df.clear())
+    stream = load_stream(table_uri)
+    stream.process_batch(pytest.fail)
+    write_deltalake(table_uri, df, mode='append')
     # Spark writes TIMESTAMP as INT96 without the Arrow schema. Materialized
     # row tracking columns are not part of the Delta schema.
     (path,) = DeltaTable(table_uri).file_uris()
@@ -136,9 +145,9 @@ def test_timestamps(table_uri, tz):
         store_schema=False,
     )
     size = Path(path).stat().st_size
-    edit_adds(table_uri, 0, lambda add: add.update(size=size))
+    edit_adds(table_uri, 1, lambda add: add.update(size=size))
     frames = []
-    load_stream(table_uri).process_batch(frames.append)
+    stream.process_batch(frames.append)
     assert_frame_equal(frames[0], df)
 
 
@@ -153,20 +162,6 @@ def test_unsupported_reader_feature_fails(table_uri, features):
 
     with pytest.raises(NotImplementedError, match='reader version'):
         read_ids(load_stream(table_uri))
-
-
-def test_earliest_with_deletion_vectors_fails(table_uri):
-    write(table_uri, [1])
-    commit_protocol(table_uri, 'deletionVectors')
-    write(table_uri, [2, 3, 4])
-    edit_adds(
-        table_uri, 2, lambda add: add.update(deletionVector=DELETION_VECTOR)
-    )
-
-    with pytest.raises(NotImplementedError, match='deletion vectors'):
-        read_ids(load_stream(table_uri))
-    # LATEST skips the rows already in the table
-    assert read_ids(load_stream(table_uri, StartingOffset.LATEST)) == []
 
 
 def test_absolute_path_fails(table_uri, stream):
@@ -242,25 +237,36 @@ def test_schema_change_fails(table_uri, stream, change, restart):
 
 
 @pytest.mark.parametrize(
-    ('changes', 'error'),
+    ('changes', 'error', 'text'),
     [
-        ([lambda uri: DeltaTable(uri).delete('id = 1')], 'deletes or updates'),
-        # The current schema and protocol are supported again
+        (
+            [lambda uri: DeltaTable(uri).delete('id = 1')],
+            ValueError,
+            'deletes or updates rows',
+        ),
+        # The current table is supported again
         (
             [add_column, lambda uri: overwrite(uri, [3])],
-            'changes the schema or partitioning',
+            ValueError,
+            'changes column names or types',
+        ),
+        (
+            [partition, lambda uri: overwrite(uri, [3])],
+            NotImplementedError,
+            'makes the table partitioned',
         ),
         (
             [
                 lambda uri: commit_protocol(uri, 'typeWidening'),
                 lambda uri: commit_protocol(uri, 'deletionVectors'),
             ],
-            'changes the protocol to an unsupported reader',
+            NotImplementedError,
+            'requires an unsupported reader protocol',
         ),
     ],
-    ids=['delete', 'schema', 'protocol'],
+    ids=['delete', 'schema', 'partition', 'protocol'],
 )
-def test_version_change_fails(table_uri, stream, changes, error):
+def test_version_change_fails(table_uri, stream, changes, error, text):
     write(table_uri, [2])
     for change in changes:
         change(table_uri)
@@ -268,7 +274,7 @@ def test_version_change_fails(table_uri, stream, changes, error):
     # The versions before the change are delivered first
     assert read_ids(stream) == [2]
     for _ in range(2):
-        with pytest.raises(ValueError, match=f'Version 2 {error}'):
+        with pytest.raises(error, match=f'Version 2 {text}'):
             read_ids(stream)
 
 
