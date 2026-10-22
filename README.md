@@ -33,8 +33,6 @@ use. Reuse the table client across
 reads; each load refreshes the table as needed.
 
 #### Storage access (own credentials)
-Object storage support currently covers Azure Blob Storage and AWS S3, plus 
-the local filesystem. The table is read with your own credentials.
 
 ##### Azure
 
