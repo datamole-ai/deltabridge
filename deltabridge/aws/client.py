@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from boto3 import Session
 from botocore.credentials import ReadOnlyCredentials
 from botocore.exceptions import NoCredentialsError
@@ -19,7 +21,15 @@ class AwsDeltaClient(BaseDeltaClient):
 
     def __init__(self, session: Session | None = None):
         self._session = session or Session()
-        self._region = self._session.region_name
+        # boto3 ignores AWS_REGION; without a region delta-rs uses us-east-1
+        self._region = self._session.region_name or os.environ.get(
+            'AWS_REGION'
+        )
+        if self._region is None:
+            raise ValueError(
+                'No AWS region found. Set the region of the bucket in the '
+                'boto3 session or in AWS_REGION.'
+            )
         self._credentials = self._get_credentials()
 
     def _get_credentials(self) -> ReadOnlyCredentials:
@@ -40,9 +50,8 @@ class AwsDeltaClient(BaseDeltaClient):
         storage_options = {
             'aws_access_key_id': self._credentials.access_key,
             'aws_secret_access_key': self._credentials.secret_key,
+            'aws_region': self._region,
         }
         if self._credentials.token:
             storage_options['aws_session_token'] = self._credentials.token
-        if self._region:
-            storage_options['aws_region'] = self._region
         return storage_options

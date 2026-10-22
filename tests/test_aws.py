@@ -27,13 +27,25 @@ def test_aws_client_static_credentials():
     }
 
 
-def test_aws_client_no_region():
+def test_aws_client_region_from_environment(monkeypatch):
+    # boto3 ignores AWS_REGION, which delta-rs reads
+    monkeypatch.setenv('AWS_REGION', 'eu-central-1')
     delta_client = AwsDeltaClient(
         session=mock_session(
             Credentials('test-key', 'test-secret'), region_name=None
         )
     )
-    assert 'aws_region' not in delta_client._get_storage_options()
+    assert delta_client._get_storage_options()['aws_region'] == 'eu-central-1'
+
+
+def test_aws_client_no_region(monkeypatch):
+    monkeypatch.delenv('AWS_REGION', raising=False)
+    with pytest.raises(ValueError, match='No AWS region'):
+        AwsDeltaClient(
+            session=mock_session(
+                Credentials('test-key', 'test-secret'), region_name=None
+            )
+        )
 
 
 def test_aws_client_credentials_expired():
