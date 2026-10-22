@@ -170,15 +170,15 @@ def poll_once() -> None:
     stream.process_batch(process_batch)
 ```
 
-* `process_batch()` reads at most one batch and returns `None`, including when no new data is available. It calls the function only for nonempty batches and raises on failure. The application owns scheduling; calls must not overlap.
-* The stream owns its offset. Delivery is at-least-once: both the checkpoint and in-memory offset advance after the function returns and the checkpoint is saved. If a read, callback or save fails, retry the call; processing must tolerate duplicates.
-* A new stream starts at the current table version and skips the rows already in the table.
-* Versions which only rearrange data, e.g. OPTIMIZE, are skipped, and so are metadata changes which keep column names and types, e.g. table properties, comments, constraints or supported protocol features. Updates, deletes and changes of column names or types raise `StreamError`, which retrying does not fix; start a new stream with a new checkpoint. Schema changes fail before processing a batch, even when the change is beyond `max_versions`.
-* Requires an unpartitioned table with reader version 1, or reader version 3 with only the reader features deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`. Partitioning, other reader features, e.g. column mapping or type widening, and data files referenced by absolute paths, e.g. by shallow clones, raise `StreamError` too.
+* `process_batch()` reads at most one batch, calls the function only if the batch has rows and returns `None`. The application schedules the calls, which must not overlap.
+* Delivery is at-least-once: the offset advances only after the function returns and the checkpoint is saved. If a call raises, retry it; processing must tolerate duplicates.
+* A new stream skips the rows already in the table.
+* OPTIMIZE and metadata changes that keep column names and types are skipped. Updates and deletes raise `StreamError` once the versions before them are delivered; changes of column names or types raise it right away. Retrying does not help; start a new stream with a new checkpoint.
+* Requires an unpartitioned table with no reader features other than deletion vectors, Checkpoint V2, `vacuumProtocolCheck` and `TIMESTAMP_NTZ`, and data files at relative paths. Other tables raise `StreamError` too.
+* Columns missing from a data file are read as nulls, and columns outside the Delta schema are ignored.
+* `max_versions` limits the commits per batch, not rows or memory.
+* Keep the checkpoint on a persistent volume and run one stream per checkpoint. Pods sharing a checkpoint, e.g. during a rolling update, deliver some batches twice; the `Recreate` strategy avoids it.
 * A stream stopped for longer than the Delta log or `VACUUM` retention cannot resume.
-* Files are read using the Delta schema. Columns missing from a file are read as nulls; other columns, e.g. internal row tracking columns, are ignored. INT96 timestamps, which Spark and Databricks write, are read in microseconds, so dates outside 1677-2262 stay correct.
-* `max_versions` must be positive; it limits commits, not rows or memory.
-* Run one stream instance per checkpoint. Instances sharing a checkpoint, e.g. pods during a rolling update, deliver some batches twice; the `Recreate` strategy avoids it. Keep the checkpoint on a persistent volume, so a new pod resumes from it.
 
 ## Supported Delta features
 
