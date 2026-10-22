@@ -159,36 +159,35 @@ def poll_once() -> None:
 
 ## Supported Delta features
 
-For `load_as_stream()`, see the limitations in [Streaming reads](#streaming-reads).
-
 ### Features that change the read protocol
 
-| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ |
-| --- | --- | --- | --- |
-| [Deletion vectors](https://learn.microsoft.com/en-us/azure/databricks/tables/features/deletion-vectors) | ❌ | ✅ | ❌ |
-| [Column mapping](https://learn.microsoft.com/en-us/azure/databricks/tables/features/column-mapping) | ❌ | ✅ | ❌² |
-| [Checkpoint V2](https://learn.microsoft.com/en-us/azure/databricks/tables/features/checkpoint-v2) | ❌ | ✅ | ❌ |
-| [`TIMESTAMP_NTZ`](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/data-types/timestamp-ntz-type) | ✅ | ✅ | ✅ |
-| [Type widening](https://learn.microsoft.com/en-us/azure/databricks/tables/features/type-widening) | ❌ | ❌ | ❌ |
-| [Catalog commits](https://learn.microsoft.com/en-us/azure/databricks/tables/features/catalog-commits) | ❌ | ❌ | ❌ |
+| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ | `load_as_stream()` |
+| --- | --- | --- | --- | --- |
+| [Deletion vectors](https://learn.microsoft.com/en-us/azure/databricks/tables/features/deletion-vectors) | ❌ | ✅ | ❌ | ✅³ |
+| [Column mapping](https://learn.microsoft.com/en-us/azure/databricks/tables/features/column-mapping) | ❌ | ✅ | ❌² | ❌ |
+| [Checkpoint V2](https://learn.microsoft.com/en-us/azure/databricks/tables/features/checkpoint-v2) | ❌ | ✅ | ❌ | ✅ |
+| [`TIMESTAMP_NTZ`](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/data-types/timestamp-ntz-type) | ✅ | ✅ | ✅ | ✅ |
+| [Type widening](https://learn.microsoft.com/en-us/azure/databricks/tables/features/type-widening) | ❌ | ❌ | ❌ | ❌ |
+| [Catalog commits](https://learn.microsoft.com/en-us/azure/databricks/tables/features/catalog-commits) | ❌ | ❌ | ❌ | ❌ |
 
 ¹ Also `to_pyarrow_table()` and `to_pandas()`, which wrap it.  
-² Reads the columns as nulls instead of failing on tables with reader version 2.
+² Reads the columns as nulls instead of failing on tables with reader version 2.  
+³ Reads the appended rows. A version that deletes or updates rows fails, with or without deletion vectors.
 
 ### Features that don't change the read protocol
 
-| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ |
-| --- | --- | --- | --- |
-| [Liquid clustering](https://learn.microsoft.com/en-us/azure/databricks/tables/clustering) | ✅³ | ✅ | ✅³ |
-| [Z-ordering](https://learn.microsoft.com/en-us/azure/databricks/tables/data-skipping#what-is-z-ordering) | ✅ | ✅ | ✅ |
+| Feature | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()`¹ | `load_as_stream()` |
+| --- | --- | --- | --- | --- |
+| [Liquid clustering](https://learn.microsoft.com/en-us/azure/databricks/tables/clustering) | ✅⁴ | ✅ | ✅⁴ | ✅ |
+| [Z-ordering](https://learn.microsoft.com/en-us/azure/databricks/tables/data-skipping#what-is-z-ordering) | ✅ | ✅ | ✅ | ✅ |
 
-³ Databricks turns on Checkpoint V2 for new liquid clustering tables. Create them with `'delta.checkpointPolicy' = 'classic'` to read them here.
+⁴ Databricks turns on Checkpoint V2 for new liquid clustering tables. Create them with `'delta.checkpointPolicy' = 'classic'` to read them with `load_as_polars()` or `to_pyarrow_dataset()`.
 
 ### What each reader returns
 
-| | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()` |
-| --- | --- | --- | --- |
-| Returns | lazy [`pl.LazyFrame`](https://docs.pola.rs/api/python/stable/reference/lazyframe/index.html) | one-shot Arrow `RecordBatchReader` | lazy `pyarrow.dataset.Dataset` |
+| | `load_as_polars()` | `load_as_delta().scan()` | `load_as_delta().to_pyarrow_dataset()` | `load_as_stream()` |
+| --- | --- | --- | --- | --- |
+| Returns | lazy [`pl.LazyFrame`](https://docs.pola.rs/api/python/stable/reference/lazyframe/index.html) | one-shot Arrow `RecordBatchReader` | lazy `pyarrow.dataset.Dataset` | a [`pl.DataFrame`](https://docs.pola.rs/api/python/stable/reference/dataframe/index.html) per batch, passed to the `process_batch()` function |
 
 ## Writing to Delta tables
 
