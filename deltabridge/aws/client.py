@@ -10,12 +10,13 @@ from deltabridge.base_delta_client import BaseDeltaClient
 
 
 class AwsDeltaClient(BaseDeltaClient):
-    """Credential client manages the refreshing of AWS S3 credentials.
+    """Delta client that reads tables from AWS S3 with a boto3 session.
 
     Parameters
     ----------
     session
-        boto3 session which is used to fetch credentials and the region.
+        boto3 session which is used to fetch credentials and the region,
+        with `AWS_REGION` as the fallback region.
         A default session is used if no session is provided.
     """
 
