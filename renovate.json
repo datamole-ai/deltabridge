@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "The minimum Python version is set explicitly so the library supports older versions",
+      "matchPackageNames": [
+        "python"
+      ],
+      "enabled": false
+    }
   ]
 }
